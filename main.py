@@ -1,7 +1,7 @@
-from time import time
+from time import sleep, time
 from typing import Tuple
 
-from adb_pywrapper.adb_device import AdbDevice
+from adb_pywrapper.adb_device import AdbDevice, subprocess
 
 from positions import BATTLE
 
@@ -27,13 +27,35 @@ def screenshot():
     print(f"Screenshotted to {filename}")
     shell(f"screencap -p > {filename}")
 
+    return filename
+
 
 def resize(w: int, h: int):
+    current = shell("wm size").stdout
+
+    if f"{w}x{h}" in current:
+        return
     shell(f"wm size {w}x{h}")
 
 
-shell("settings put system pointer_location 1")
+# shell("settings put system pointer_location 1")
 size = shell("wm size")
-# resize(640, 640)
 
-tap(BATTLE)
+resize(640, 640)
+
+while True:
+    sleep(2)
+    filename = screenshot()
+    subprocess.run(
+        [
+            "python",
+            "model.py",
+            "--mode",
+            "classify",
+            "--model",
+            "./runs/detect/train/weights/best.pt",
+            "--image",
+            filename,
+        ],
+        text=True,
+    )

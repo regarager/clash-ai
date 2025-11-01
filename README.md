@@ -1,20 +1,36 @@
-- Image recognition to read board state
-  - Might use a library/previous code to do this
-  - OpenCV, Keras, Pytorch, Bluestacks/some other Android emulator
-- Reinforcement learning model
-  - Goal: be able to make an optimal move once every 250 ms
-  - Features
-    - Elixir
-    - Board state
-      - Troops placed, location, spells, spells duration, charging (for troops like Prince), targets
-    - Hand
-    - Tower HP
-    - Time
-- Play beatdown
-  - Evo skele, evo bats, egolem, nwitch, epump, skeleking, arrows, rage
+# Clash Royale Bot
+## Setup
 
-- Alternate:
-  - Board state tracker, track evos, elixir, leaked, etc.
-- Dataset: https://universe.roboflow.com/clash-royale-kmrln/clash-royale-data-set-cpcz0/dataset/13
-- Images: https://universe.roboflow.com/minesbot/clash-royale-bot
-- CR APK: https://apkpure.com/clash-royale/com.supercell.clashroyale/download (select arm64-v8a)
+### Dependencies
+
+- An Android emulator using [ADB](https://developer.android.com/tools/adb) with Clash Royale installed
+- The [`uv`](https://docs.astral.sh/uv/) package manager
+
+### Installation
+
+1. Download `runs.zip` from the releases tab and unzip it into the folder. The directory structure should be `clash-ai/runs/...`
+2. Setup a virtual environment and activate it: `uv venv && source .venv/bin/activate`
+3. Install `pip` dependencies: `uv sync`
+
+## Trimester 1 Milestone
+
+### Usage
+
+There are two files that can be run in this project - `main.py` and `model.py`.
+
+- `model.py`
+  - To train the model, run `python model.py --mode train --device 0`. Alternatively, use `--device cpu` if there is no CUDA GPU available. Note that this will be extremely slow.
+    - Training will not be necessary if the `runs.zip` file has been setup properly
+  - To classify an image after training, run `python model.py --mode classify --model ./runs/detect/train/weights/best.pt --image <image_path>`
+  - For more configuration options, run `python model.py --help`
+
+- `main.py`
+  - Simply run `python main.py` after opening Clash Royale on the emulator
+  - The program takes a screenshot every 2 seconds and sends it through the classifier.
+
+### Examples and Figures
+
+![](./images/demo1.png "Demo 1")
+![](./images/demo2.png "Demo 2")
+![](./images/confusion_matrix.png "Confusion Matrix")
+![](./images/results.png "Training Results")
