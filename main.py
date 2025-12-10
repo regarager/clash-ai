@@ -1,61 +1,22 @@
-from time import sleep, time
-from typing import Tuple
+import random
+from time import sleep 
 
-from adb_pywrapper.adb_device import AdbDevice, subprocess
+from adb_pywrapper.adb_device import AdbDevice
 
-from positions import BATTLE
+from bot import Bot
 
-devices = AdbDevice.list_devices()
+def main():
+    bot = Bot(AdbDevice.list_devices()[0])
 
-device = AdbDevice(devices[0])
-print("Found devices", devices)
-print("Using first device:", device)
+    if bot.is_offline():
+        print("emulator offline")
+        exit()
 
-print("Status:", device.get_device_status(devices[0]))
+    bot.battle()
+    while True:
+        sleep(1)
+        # bot.screenshot()
+        bot.play_card(random.randint(0, 3), random.random(), random.random())
 
-
-def shell(cmd: str):
-    return device.shell(cmd)
-
-
-def tap(p: Tuple[int, int]):
-    shell(f"input mouse tap {p[0]} {p[1]}")
-
-
-def screenshot():
-    filename = f"screenshots/{int(time())}.png"
-    print(f"Screenshotted to {filename}")
-    shell(f"screencap -p > {filename}")
-
-    return filename
-
-
-def resize(w: int, h: int):
-    current = shell("wm size").stdout
-
-    if f"{w}x{h}" in current:
-        return
-    shell(f"wm size {w}x{h}")
-
-
-# shell("settings put system pointer_location 1")
-size = shell("wm size")
-
-resize(640, 640)
-
-while True:
-    sleep(2)
-    filename = screenshot()
-    subprocess.run(
-        [
-            "python",
-            "model.py",
-            "--mode",
-            "classify",
-            "--model",
-            "./runs/detect/train/weights/best.pt",
-            "--image",
-            filename,
-        ],
-        text=True,
-    )
+if __name__ == "__main__":
+    main()
