@@ -11,6 +11,7 @@
 1. Download `runs.zip` from the releases tab and unzip it into the folder. The directory structure should be `clash-ai/runs/...`
 2. Setup a virtual environment and activate it: `uv venv && source .venv/bin/activate`
 3. Install `pip` dependencies: `uv sync`
+4. Run the setup script to download the Roboflow model: `python3 setup.py`
 
 ## Trimester 1 Milestone
 
