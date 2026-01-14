@@ -33,7 +33,7 @@ def download_model(api_key):
     """
     Downloads the YOLOv8 model from Roboflow.
     """
-    model_path = "clash-ai-kimrx-instant-9/best.pt"
+    model_path = "clash-ai-8/best.pt"
 
     if os.path.exists(model_path):
         print(f"Local model already found at '{model_path}'. Skipping download.")
@@ -42,11 +42,11 @@ def download_model(api_key):
     print("Downloading model from Roboflow...")
     try:
         rf = Roboflow(api_key=api_key)
-        project = rf.workspace("stuff-m0fm7").project("clash-ai-kimrx-instant")
-        version = project.version(9)
+        project = rf.workspace("stuff-m0fm7").project("clash-ai-kimrx")
+        version = project.version(8)
         version.download("yolov8")
         print("Model downloaded successfully.")
-        print("The model is saved in the 'clash-ai-kimrx-instant-9' directory.")
+        print("The model is saved in the 'clash-ai-8' directory.")
     except Exception as e:
         print(f"Error downloading model from Roboflow: {e}")
         print("\nPlease check your API key and project path.")

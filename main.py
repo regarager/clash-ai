@@ -1,6 +1,7 @@
 import torch
 import os
 import yaml
+import glob
 from time import sleep
 from roboflow import Roboflow
 from ultralytics import YOLO
@@ -67,32 +68,22 @@ def main():
     Main loop for the Clash Royale AI bot using a local YOLO model.
     """
     print("--- Clash Royale AI Bot (Local Inference) ---")
-    print("SECURITY REMINDER: Do not share your API key. Use the ROBOFLOW_API_KEY environment variable.")
-
-    # --- Download Roboflow Model (if needed) ---
-    api_key = os.environ.get("ROBOFLOW_API_KEY")
-    if not api_key:
-        print("\nERROR: ROBOFLOW_API_KEY is required to download the model for the first time.")
-        print("Please create a .env file in the project root with ROBOFLOW_API_KEY='YOUR_API_KEY'")
-        print("Or set it as an environment variable before running.")
+    found_yaml_path = glob.glob("clash-ai-*/data.yaml")
+    if not found_yaml_path:
+        print("Error: Could not find data.yaml in any clash-ai-* directory.")
+        print("Please run setup.py to download the model first.")
         exit()
-
-    model_path = "clash-ai-kimrx-instant-9/best.pt"
-    yaml_path = "clash-ai-kimrx-instant-9/data.yaml"
+    
+    model_dir = os.path.dirname(found_yaml_path[0])
+    model_path = os.path.join(model_dir, "best.pt")
+    yaml_path = found_yaml_path[0]
 
     if not os.path.exists(model_path):
-        print(f"Local model not found at '{model_path}'. Downloading from Roboflow...")
-        try:
-            rf = Roboflow(api_key=api_key)
-            project = rf.workspace("stuff-m0fm7").project("clash-ai-kimrx-instant")
-            version = project.version(9)
-            version.download("yolov8")
-            print("Model downloaded successfully.")
-        except Exception as e:
-            print(f"Error downloading model from Roboflow: {e}")
-            exit()
-    else:
-        print("Local model found.")
+        print(f"Local model not found at '{model_path}'.")
+        print("Please run setup.py to download the model.")
+        exit()
+    
+    print("Local model found.")
     
     # --- Load Class Names from data.yaml ---
     global NUM_CARD_TYPES, CLASS_NAMES
