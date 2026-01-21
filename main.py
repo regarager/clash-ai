@@ -10,13 +10,14 @@ from adb_pywrapper.adb_device import AdbDevice
 
 from agent import ActorCritic
 from bot import Bot
-from roboflow_service import get_roboflow_predictions  # Added
+from roboflow_service import get_roboflow_predictions
+from vision import get_elixir
 
 # Load environment variables from .env file at the very beginning
 dotenv.load_dotenv()
 
 # --- Model and State Configuration ---
-FIXED_INPUT_DIM = 3
+FIXED_INPUT_DIM = 4  # Elixir, time, and other global features
 # The following are derived from the downloaded model's data.yaml
 num_card_types: int | None = None
 class_names: list[str] | None = None
@@ -25,12 +26,18 @@ NUM_DISCRETE_ACTIONS = 5
 CONTINUOUS_ACTION_DIM = 2
 CARD_EMBEDDING_SIZE = 16
 
+# --- Card Type Classification ---
+TOWER_CARDS = {"Cannon", "Goblin Hut", "Mortar", "Inferno Tower", "Bomb Tower", "Barbarian Hut", "Tesla", "Elixir Collector", "X-Bow", "Tombstone", "Furnace", "Goblin Cage", "Goblin Drill"}
+SPELL_CARDS = {"Fireball", "Arrows", "Rage", "Rocket", "Goblin Barrel", "Freeze", "Mirror", "Lightning", "Zap", "Poison", "Graveyard", "The Log", "Tornado", "Clone", "Earthquake", "Barbarian Barrel", "Heal Spirit", "Giant Snowball", "Royal Delivery", "Void", "Goblin Curse", "Spirit Empress", "Vines"}
+
+
 # Load CLASS_NAMES from cards.json
 try:
     with open("cards.json", "r") as f:
         cards_data = json.load(f)
         class_names = [card["name"] for card in cards_data["items"]]
         num_card_types = len(class_names)
+        TROOP_CARDS = {name for name in class_names if name not in TOWER_CARDS and name not in SPELL_CARDS}
     print(f"Loaded {num_card_types} class names from cards.json.")
 except Exception as e:
     print(f"Error loading class names from cards.json: {e}")
@@ -55,7 +62,10 @@ def get_state(
             [],
         )
 
-    # 1. Run Roboflow object detection model via API
+    # 1. Get Elixir
+    elixir = get_elixir(screenshot_path)
+
+    # 2. Run Roboflow object detection model via API
     try:
         roboflow_results = get_roboflow_predictions(screenshot_path)
 
@@ -76,10 +86,12 @@ def get_state(
     print(f"Detected {len(detections)} objects.")
     print(f"Roboflow Detections: {detections}")
 
-    # 2. Simulate fixed inputs (placeholder)
-    fixed_inputs = torch.randn(FIXED_INPUT_DIM)
+    # 3. Simulate fixed inputs (placeholder for time, etc.)
+    # We will use elixir, and placeholders for other features
+    fixed_inputs = torch.tensor([elixir, 0, 0, 0], dtype=torch.float32)
 
-    # 3. Preprocess detections into tensors
+
+    # 4. Preprocess detections into tensors
     if len(detections) == 0:
         return fixed_inputs, torch.empty(0, dtype=torch.long), torch.empty(0), []
 
@@ -92,16 +104,19 @@ def get_state(
     for detection in detections:
         class_name = detection["class"]
         try:
-            card_id = cast(list[str], class_names).index(class_name)
-            card_ids_list.append(card_id)
+            # We assume class names might have prefixes like "ally_" or "enemy_"
+            base_class_name = "_".join(class_name.split("_")[1:]) if "_" in class_name else class_name
+            if base_class_name in class_names:
+                card_id = cast(list[str], class_names).index(base_class_name)
+                card_ids_list.append(card_id)
 
-            x_center = detection["x"] / screen_width
-            y_center = detection["y"] / screen_height
-            width = detection["width"] / screen_width
-            height = detection["height"] / screen_height
+                x_center = detection["x"] / screen_width
+                y_center = detection["y"] / screen_height
+                width = detection["width"] / screen_width
+                height = detection["height"] / screen_height
 
-            card_continuous_features_list.append([x_center, y_center, width, height])
-        except ValueError:
+                card_continuous_features_list.append([x_center, y_center, width, height])
+        except (ValueError, IndexError):
             print(
                 f"Warning: Detected class '{class_name}' not found in CLASS_NAMES. Skipping."
             )
@@ -124,62 +139,39 @@ def calculate_reward(
     previous_detections: list[dict[str, Any]],
 ) -> float:
     """
-    Calculates the reward based on the change in the number of detected towers.
-
-    Args:
-        bot (Bot): The bot instance, for context.
-        current_detections (list): The list of detections from the current state.
-        previous_detections (list): The list of detections from the previous state.
-
-    Returns:
-        float: The calculated reward.
+    Calculates the reward based on the change in game state.
     """
     reward = 0.0
 
-    # Define class names for towers (these are assumptions and may need to be adjusted)
-    # Based on the Roboflow model's actual output.
-    # We will assume a naming convention like 'ally_king_tower', 'ally_princess_tower',
-    # 'enemy_king_tower', 'enemy_princess_tower'.
+    # Define class names for towers
     ally_tower_classes = {"ally_king_tower", "ally_princess_tower"}
     enemy_tower_classes = {"enemy_king_tower", "enemy_princess_tower"}
 
-    # --- Count towers in current and previous states ---
+    # --- Tower Rewards/Penalties ---
+    current_ally_towers = sum(1 for d in current_detections if d.get("class") in ally_tower_classes)
+    previous_ally_towers = sum(1 for d in previous_detections if d.get("class") in ally_tower_classes)
+    current_enemy_towers = sum(1 for d in current_detections if d.get("class") in enemy_tower_classes)
+    previous_enemy_towers = sum(1 for d in previous_detections if d.get("class") in enemy_tower_classes)
 
-    current_ally_towers = sum(
-        1 for d in current_detections if d.get("class") in ally_tower_classes
-    )
-    previous_ally_towers = sum(
-        1 for d in previous_detections if d.get("class") in ally_tower_classes
-    )
-
-    current_enemy_towers = sum(
-        1 for d in current_detections if d.get("class") in enemy_tower_classes
-    )
-    previous_enemy_towers = sum(
-        1 for d in previous_detections if d.get("class") in enemy_tower_classes
-    )
-
-    # --- Reward for destroying towers ---
     if current_enemy_towers < previous_enemy_towers:
         print("Reward: +5 (Enemy tower destroyed)")
         reward += 5.0
-
-    # --- Penalty for losing towers ---
     if current_ally_towers < previous_ally_towers:
         print("Reward: -5 (Ally tower lost)")
         reward -= 5.0
 
-    # --- Small continuous rewards/penalties ---
-    # Small penalty for each enemy tower still standing
-    reward -= 0.1 * current_enemy_towers
+    # --- Troop Rewards/Penalties ---
+    current_ally_troops = sum(1 for d in current_detections if d.get("class") and d.get("class").startswith("ally_") and "_".join(d.get("class").split("_")[1:]) in TROOP_CARDS)
+    current_enemy_troops = sum(1 for d in current_detections if d.get("class") and d.get("class").startswith("enemy_") and "_".join(d.get("class").split("_")[1:]) in TROOP_CARDS)
 
-    # Small reward for each ally tower still standing
-    reward += 0.1 * current_ally_towers
+    reward += 0.1 * current_ally_troops
+    reward -= 0.1 * current_enemy_troops
+
 
     if reward != 0.0:
         print(f"Calculated reward: {reward}")
     else:
-        print("Calculated reward: 0.0 (No change in towers)")
+        print("Calculated reward: 0.0 (No change in state)")
 
     return reward
 
