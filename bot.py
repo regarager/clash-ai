@@ -1,7 +1,6 @@
 from time import time, sleep
 from adb_pywrapper.adb_device import AdbDevice
-
-from positions import *
+from positions import BATTLE, CARDS, ALLY_CORNERS
 
 
 class Bot:
@@ -34,5 +33,24 @@ class Bot:
         self.shell("settings put system pointer_location 1")
 
         return filename
+
+    def get_screen_size(self) -> tuple[int, int]:
+        """
+        Gets the current screen size of the device using 'wm size' adb command.
+        Returns:
+            tuple[int, int]: A tuple containing (width, height) of the screen.
+        """
+        output = self.adb.shell("wm size")
+        # Expected output format: "Physical size: WxH"
+        # Example: "Physical size: 1432x1736"
+        parts = output.strip().split(": ")
+        if len(parts) == 2:
+            dimensions = parts[1].split("x")
+            if len(dimensions) == 2:
+                width = int(dimensions[0])
+                height = int(dimensions[1])
+                return width, height
+        print(f"Warning: Could not parse screen size from adb output: {output}. Defaulting to 1920x1080.")
+        return 1920, 1080
 
 
