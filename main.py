@@ -11,7 +11,7 @@ from adb_pywrapper.adb_device import AdbDevice
 from agent import ActorCritic
 from bot import Bot
 from roboflow_service import get_roboflow_predictions
-from vision import get_elixir
+from vision import get_elixir, get_tower_healths
 
 # Load environment variables from .env file at the very beginning
 dotenv.load_dotenv()
@@ -46,7 +46,7 @@ except Exception as e:
 
 def get_state(
     bot: Bot,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[dict[str, Any]]]:
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, list[dict[str, Any]], dict[str, float]]:
     """
     Gets the current game state by taking a screenshot and running the Roboflow
     object detection model via API.
@@ -60,12 +60,16 @@ def get_state(
             torch.empty(0, dtype=torch.long),
             torch.empty(0),
             [],
+            {},
         )
 
     # 1. Get Elixir
     elixir = get_elixir(screenshot_path)
 
-    # 2. Run Roboflow object detection model via API
+    # 2. Get Tower Healths
+    tower_healths = get_tower_healths(screenshot_path)
+
+    # 3. Run Roboflow object detection model via API
     try:
         roboflow_results = get_roboflow_predictions(screenshot_path)
 
@@ -79,6 +83,7 @@ def get_state(
             torch.empty(0, dtype=torch.long),
             torch.empty(0),
             [],
+            {},
         )
     finally:
         os.remove(screenshot_path)
@@ -86,14 +91,14 @@ def get_state(
     print(f"Detected {len(detections)} objects.")
     print(f"Roboflow Detections: {detections}")
 
-    # 3. Simulate fixed inputs (placeholder for time, etc.)
+    # 4. Simulate fixed inputs (placeholder for time, etc.)
     # We will use elixir, and placeholders for other features
     fixed_inputs = torch.tensor([elixir, 0, 0, 0], dtype=torch.float32)
 
 
-    # 4. Preprocess detections into tensors
+    # 5. Preprocess detections into tensors
     if len(detections) == 0:
-        return fixed_inputs, torch.empty(0, dtype=torch.long), torch.empty(0), []
+        return fixed_inputs, torch.empty(0, dtype=torch.long), torch.empty(0), [], tower_healths
 
     card_ids_list: list[int] = []
     card_continuous_features_list: list[list[float]] = []
@@ -123,20 +128,22 @@ def get_state(
             continue
 
     if not card_ids_list:  # If no valid cards were detected
-        return fixed_inputs, torch.empty(0, dtype=torch.long), torch.empty(0), []
+        return fixed_inputs, torch.empty(0, dtype=torch.long), torch.empty(0), [], tower_healths
 
     card_ids = torch.tensor(card_ids_list, dtype=torch.long)
     card_continuous_features = torch.tensor(
         card_continuous_features_list, dtype=torch.float32
     )
 
-    return fixed_inputs, card_ids, card_continuous_features, detections
+    return fixed_inputs, card_ids, card_continuous_features, detections, tower_healths
 
 
 def calculate_reward(
     bot: Bot,
     current_detections: list[dict[str, Any]],
     previous_detections: list[dict[str, Any]],
+    current_tower_healths: dict[str, float],
+    previous_tower_healths: dict[str, float],
 ) -> float:
     """
     Calculates the reward based on the change in game state.
@@ -147,18 +154,14 @@ def calculate_reward(
     ally_tower_classes = {"ally_king_tower", "ally_princess_tower"}
     enemy_tower_classes = {"enemy_king_tower", "enemy_princess_tower"}
 
-    # --- Tower Rewards/Penalties ---
-    current_ally_towers = sum(1 for d in current_detections if d.get("class") in ally_tower_classes)
-    previous_ally_towers = sum(1 for d in previous_detections if d.get("class") in ally_tower_classes)
-    current_enemy_towers = sum(1 for d in current_detections if d.get("class") in enemy_tower_classes)
-    previous_enemy_towers = sum(1 for d in previous_detections if d.get("class") in enemy_tower_classes)
-
-    if current_enemy_towers < previous_enemy_towers:
-        print("Reward: +5 (Enemy tower destroyed)")
-        reward += 5.0
-    if current_ally_towers < previous_ally_towers:
-        print("Reward: -5 (Ally tower lost)")
-        reward -= 5.0
+    # --- Tower Health Rewards/Penalties ---
+    for tower_name, current_health in current_tower_healths.items():
+        previous_health = previous_tower_healths.get(tower_name, current_health)
+        health_delta = current_health - previous_health
+        if "enemy" in tower_name and health_delta < 0:
+            reward += abs(health_delta) * 10  # Reward for damaging enemy towers
+        elif "ally" in tower_name and health_delta < 0:
+            reward -= abs(health_delta) * 10  # Penalty for ally towers taking damage
 
     # --- Troop Rewards/Penalties ---
     current_ally_troops = sum(1 for d in current_detections if d.get("class") and d.get("class").startswith("ally_") and "_".join(d.get("class").split("_")[1:]) in TROOP_CARDS)
@@ -204,7 +207,8 @@ def main() -> None:
 
     print("\nStarting bot...")
 
-    previous_detections: list[dict[str, Any]] = []  # Initialize previous detections
+    previous_detections: list[dict[str, Any]] = []
+    previous_tower_healths: dict[str, float] = {}
 
     try:
         while True:
@@ -214,6 +218,7 @@ def main() -> None:
                 card_ids,
                 card_features,
                 current_detections,
+                current_tower_healths,
             ) = get_state(bot)
 
             # 2. Ask agent for action and store log_probs and state_value
@@ -234,16 +239,15 @@ def main() -> None:
 
             # 4. Calculate reward
             reward: float = calculate_reward(
-                bot, current_detections, previous_detections
+                bot, current_detections, previous_detections, current_tower_healths, previous_tower_healths
             )
             agent.rewards.append(reward)
 
             # 5. Update the agent
             agent.update()
 
-            previous_detections = (
-                current_detections  # Update previous detections for next iteration
-            )
+            previous_detections = current_detections
+            previous_tower_healths = current_tower_healths
 
     except KeyboardInterrupt:
         print("\nBot stopped by user.")
