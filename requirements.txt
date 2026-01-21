@@ -1,0 +1,6 @@
+inference
+opencv-python
+python-dotenv
+roboflow
+torch
+ruff
