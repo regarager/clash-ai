@@ -1,6 +1,8 @@
 import cv2
 import numpy as np
 
+from positions import ELIXIR_BAR_BBOX
+
 def get_elixir(image_path: str) -> int:
     """
     Calculates the current elixir count from a screenshot of the game.
@@ -11,7 +13,7 @@ def get_elixir(image_path: str) -> int:
 
     # Bounding box for the elixir bar [x, y, w, h]
     # These values might need adjustment depending on the device's screen resolution.
-    bbox = (290, 1775, 490, 30)
+    bbox = ELIXIR_BAR_BBOX
     x, y, w, h = bbox
     elixir_bar_image = image[y:y+h, x:x+w]
 
@@ -86,3 +88,40 @@ def get_tower_healths(image_path: str) -> dict[str, float]:
         tower_healths[name] = health_ratio
         
     return tower_healths
+
+def is_elixir_bar_visible(image_path: str) -> bool:
+    """
+    Checks if the elixir bar is visible in a screenshot.
+    """
+    # First, check if there's any purple elixir
+    elixir = get_elixir(image_path)
+    if elixir > 0:
+        return True
+
+    # If no purple elixir, check if the empty background is mostly covered
+    image = cv2.imread(image_path)
+    if image is None:
+        return False
+
+    # Bounding box for the elixir bar [x, y, w, h]
+    bbox = ELIXIR_BAR_BBOX
+    x, y, w, h = bbox
+    elixir_bar_image = image[y:y+h, x:x+w]
+
+    hsv_image = cv2.cvtColor(elixir_bar_image, cv2.COLOR_BGR2HSV)
+
+    lower_empty_elixir = np.array([98, 196, 34])
+    upper_empty_elixir = np.array([118, 255, 134])
+
+    mask = cv2.inRange(hsv_image, lower_empty_elixir, upper_empty_elixir)
+
+    # Calculate the percentage of the bar that is the 'empty' color
+    empty_pixels = cv2.countNonZero(mask)
+    total_pixels = w * h
+    if total_pixels == 0:
+        return False
+        
+    empty_fill_ratio = empty_pixels / total_pixels
+
+    # If at least 50% of the bar is the 'empty' color, we assume it's visible.
+    return empty_fill_ratio >= 0.5
