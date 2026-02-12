@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import torch
 from ultralytics.models import YOLO
+from positions import BBox
 
 
 def train_model(device: str):
@@ -99,6 +100,7 @@ def display_results(results, image_path):
         for i, box in enumerate(r.boxes):
             # Extract coordinates and convert to Python scalars
             x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+            bbox = BBox(int(x1), int(y1), int(x2), int(y2))
             confidence = box.conf[0].cpu().item()  # Use .item() to get Python scalar
             class_id = box.cls[0].cpu().item()  # Use .item() to get Python scalar
             class_id_int = int(class_id)  # Convert to integer
@@ -107,7 +109,7 @@ def display_results(results, image_path):
             print(f"Detection {i+1}:")
             print(f"  Class: {class_name} (ID: {class_id_int})")
             print(f"  Confidence: {confidence:.4f}")
-            print(f"  Bounding Box: [{x1:.1f}, {y1:.1f}, {x2:.1f}, {y2:.1f}]")
+            print(f"  Bounding Box: [{bbox.x1:.1f}, {bbox.y1:.1f}, {bbox.x2:.1f}, {bbox.y2:.1f}]")
 
 
 def _get_devices():

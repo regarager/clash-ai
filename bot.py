@@ -43,7 +43,7 @@ class Bot:
         output = self.adb.shell("wm size")
         # Expected output format: "Physical size: WxH"
         # Example: "Physical size: 1432x1736"
-        parts = output.strip().split(": ")
+        parts = output.stdout.strip().split(": ")
         if len(parts) == 2:
             dimensions = parts[1].split("x")
             if len(dimensions) == 2:

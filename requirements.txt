@@ -4,3 +4,4 @@ python-dotenv
 roboflow
 torch
 ruff
+adb-pywrapper

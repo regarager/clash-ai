@@ -35,3 +35,6 @@ There are two files that can be run in this project - `main.py` and `model.py`.
 ![](./images/demo2.png "Demo 2")
 ![](./images/confusion_matrix.png "Confusion Matrix")
 ![](./images/results.png "Training Results")
+
+## Trimester 2 Milestone
+**Note: the emulator should be run with size 1432x1736** to ensure that positions work properly.

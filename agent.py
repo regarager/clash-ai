@@ -1,10 +1,15 @@
-from typing import Any
+from typing import Any, Optional
+from time import sleep 
 
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.distributions import Categorical, Normal
 from typing_extensions import override
+
+from vision import get_full_game_state, calculate_reward
+from bot import Bot
+from game_state import GameState
 
 __all__ = ["ActorCritic"]
 
@@ -13,19 +18,6 @@ class ActorCritic(nn.Module):
     """
     An Actor-Critic model for a hybrid action space (discrete + continuous)
     and mixed input types, updated to properly handle categorical card IDs.
-
-    This model is designed for a reinforcement learning environment where the agent
-    must choose a discrete action and a continuous action.
-
-    The architecture uses a shared backbone to process three types of inputs:
-    1. A fixed-size vector of numerical features (e.g., tower HP, elixir).
-    2. Categorical IDs for each card on screen (e.g., knight=0, archer=1).
-    3. A vector of continuous features for each card (e.g., x, y, hp_ratio).
-
-    The model has three outputs:
-    1. A probability distribution for the discrete actions (Actor's policy).
-    2. A probability distribution for the continuous actions (Actor's policy).
-    3. An estimated state value (Critic's value).
     """
 
     fixed_mlp: nn.Sequential
@@ -43,6 +35,7 @@ class ActorCritic(nn.Module):
 
     def __init__(
         self,
+        bot: Bot,
         fixed_input_dim: int,
         num_card_types: int,
         card_continuous_feature_dim: int,
@@ -52,39 +45,17 @@ class ActorCritic(nn.Module):
         hidden_dim: int = 256,
         learning_rate: float = 1e-4,
     ):
-        """
-        Initializes the model layers.
-
-        Args:
-            fixed_input_dim (int): Dimensionality of the fixed numerical input vector.
-            num_card_types (int): The number of unique card types for the embedding layer.
-            card_continuous_feature_dim (int): Dimensionality of the continuous feature vector for each card.
-            num_discrete_actions (int): The number of possible discrete actions.
-            continuous_action_dim (int): Dimensionality of the continuous action space (e.g., 2 for x, y).
-            card_embedding_size (int): The size of the dense embedding for each card type.
-            hidden_dim (int): The size of the hidden layers.
-            learning_rate (float): The learning rate for the optimizer.
-        """
         super(ActorCritic, self).__init__()
+        self.bot = bot
         self.rewards = []
         self.log_probs = []
         self.state_values = []
 
-        # --- Input Processing Layers ---
-
-        # 1. MLP for fixed numerical inputs
         self.fixed_mlp = nn.Sequential(
             nn.Linear(fixed_input_dim, hidden_dim // 2), nn.ReLU()
         )
-
-        # 2. Embedding layer for categorical card IDs
         self.card_embedding = nn.Embedding(num_card_types, card_embedding_size)
-
-        # The total dimension for one card's features after embedding and concatenation
         card_feature_dim = card_embedding_size + card_continuous_feature_dim
-
-        # 3. Self-Attention for all card features
-        # nhead must be a divisor of the feature dimension
         nhead = 4 if card_feature_dim % 4 == 0 else (2 if card_feature_dim % 2 == 0 else 1)
         self.attention = nn.MultiheadAttention(
             embed_dim=card_feature_dim, num_heads=nhead, batch_first=True
@@ -95,7 +66,6 @@ class ActorCritic(nn.Module):
 
         combined_feature_dim = hidden_dim
 
-        # --- Actor Heads ---
         self.discrete_action_head = nn.Sequential(
             nn.Linear(combined_feature_dim, hidden_dim),
             nn.ReLU(),
@@ -109,16 +79,54 @@ class ActorCritic(nn.Module):
         self.continuous_action_log_std = nn.Parameter(
             torch.zeros(continuous_action_dim)
         )
-
-        # --- Critic Head ---
         self.critic_head = nn.Sequential(
             nn.Linear(combined_feature_dim, hidden_dim),
             nn.ReLU(),
             nn.Linear(hidden_dim, 1),
         )
-
-        # --- Optimizer ---
         self.optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate)
+
+    def step(
+        self,
+        previous_state: Optional[GameState],
+    ) -> GameState:
+        """
+        Performs one step of the game loop: gets state, selects action,
+        calculates reward, and updates the agent.
+        """
+        # 1. Get current game state
+        current_state = get_full_game_state(self.bot)
+        print(current_state) # Print the current game state
+
+        if previous_state is None:
+            return current_state
+            
+        # 2. Ask agent for action
+        d_action, c_action = self.select_action(
+            current_state.fixed_inputs,
+            current_state.card_ids,
+            current_state.card_continuous_features,
+        )
+
+        # 3. Take action
+        if d_action < 4:  # Assuming actions 0-3 are "play card"
+            print(f"Agent chose to play card {d_action} at position {c_action}")
+            scaled_x = (c_action[0] + 1) / 2
+            scaled_y = (c_action[1] + 1) / 2
+            self.bot.play_card(d_action, scaled_x, scaled_y)
+        else:
+            print("Agent chose to do nothing (action 4).")
+
+        sleep(2)  # Wait for the game to update after an action
+
+        # 4. Calculate reward based on state change
+        reward = calculate_reward(current_state, previous_state)
+        self.rewards.append(reward)
+
+        # 5. Update the agent
+        self.update()
+
+        return current_state
 
     @override
     def forward(
@@ -127,28 +135,17 @@ class ActorCritic(nn.Module):
         card_ids: torch.Tensor | None,
         card_continuous_features: torch.Tensor | None,
     ) -> tuple[Categorical, Normal, torch.Tensor]:
-        """
-        Defines the forward pass of the model.
-
-        Args:
-            fixed_inputs (torch.Tensor): Shape (batch_size, fixed_input_dim).
-            card_ids (torch.LongTensor): Shape (batch_size, num_cards).
-            card_continuous_features (torch.Tensor): Shape (batch_size, num_cards, card_continuous_feature_dim).
-
-        Returns:
-            (Categorical, Normal, torch.Tensor): Distributions for actions and the state value.
-        """
         fixed_features = self.fixed_mlp(fixed_inputs)
 
         if card_ids is not None and card_ids.nelement() > 0:
             card_embeds = self.card_embedding(card_ids)
-            if card_continuous_features is not None:
+            if card_continuous_features is not None and card_continuous_features.nelement() > 0:
                 card_full_features = torch.cat(
                     [card_embeds, card_continuous_features], dim=-1
                 )
             else:
                 card_full_features = card_embeds
-
+            
             attn_output, _ = self.attention(
                 card_full_features, card_full_features, card_full_features
             )
@@ -167,7 +164,6 @@ class ActorCritic(nn.Module):
         continuous_dist = Normal(continuous_mean, action_std)
 
         state_value = self.critic_head(combined_features)
-
         return discrete_dist, continuous_dist, state_value
 
     def select_action(
@@ -176,10 +172,6 @@ class ActorCritic(nn.Module):
         card_ids: torch.Tensor | None,
         card_continuous_features: torch.Tensor | None,
     ) -> tuple[int, np.ndarray[Any, Any]]:
-        """
-        Selects an action by sampling from the policy distributions and stores
-        the log probabilities and state value for training.
-        """
         if fixed_inputs.dim() == 1:
             fixed_inputs = fixed_inputs.unsqueeze(0)
         if card_ids is not None and card_ids.nelement() > 0:
@@ -200,8 +192,6 @@ class ActorCritic(nn.Module):
 
         discrete_log_prob = discrete_dist.log_prob(discrete_action)
         continuous_log_prob = continuous_dist.log_prob(continuous_action).sum(dim=-1)
-
-        # Store log_probs and state_values for training
         self.log_probs.append(discrete_log_prob + continuous_log_prob)
         self.state_values.append(state_value)
 
@@ -211,58 +201,41 @@ class ActorCritic(nn.Module):
         )
 
     def update(self, gamma: float = 0.99) -> None:
-        """
-        Updates the model weights using the collected rewards, log_probs, and state_values.
-        This implements a simple Advantage Actor-Critic (A2C) update.
-        """
         if not self.rewards:
-            return  # Nothing to update
+            return
 
-        # Convert lists to tensors
         rewards = torch.tensor(self.rewards, dtype=torch.float32)
         log_probs = torch.stack(self.log_probs)
         state_values = torch.stack(self.state_values).squeeze()
 
-        # Calculate returns (discounted rewards)
         returns: list[float] = []
         discounted_reward: float = 0.0
         for r in reversed(rewards):
             discounted_reward = r + gamma * discounted_reward
             returns.insert(0, discounted_reward)
         returns_tensor = torch.tensor(returns)
-
-        # Normalize returns for stability
         returns_tensor = (returns_tensor - returns_tensor.mean()) / (
             returns_tensor.std() + 1e-9
         )
 
-        # Calculate advantage
         advantage = returns_tensor - state_values.detach()
-
-        # Calculate actor and critic losses
         actor_loss = -(log_probs * advantage).mean()
         critic_loss = nn.functional.mse_loss(state_values, returns_tensor)
-
-        # Total loss
         loss = actor_loss + 0.5 * critic_loss
 
-        # Perform backpropagation
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
-        # Clear the buffers for the next episode/batch
         self.rewards.clear()
         self.log_probs.clear()
         self.state_values.clear()
 
     def save_model(self, path: str = "clash_ai_agent.pth") -> None:
-        """Saves the model state dictionary."""
         torch.save(self.state_dict(), path)
         print(f"Model saved to {path}")
 
     def load_model(self, path: str = "clash_ai_agent.pth") -> None:
-        """Loads the model state dictionary."""
         try:
             self.load_state_dict(torch.load(path))
             print(f"Model loaded from {path}")
@@ -277,9 +250,6 @@ class ActorCritic(nn.Module):
         card_ids: torch.Tensor | None,
         card_continuous_features: torch.Tensor | None,
     ) -> torch.Tensor:
-        """
-        Gets the value of a state from the critic.
-        """
         _, _, state_value = self.forward(
             fixed_inputs, card_ids, card_continuous_features
         )
@@ -287,15 +257,27 @@ class ActorCritic(nn.Module):
 
 
 if __name__ == "__main__":
-    # --- Example Usage ---
-    FIXED_INPUT_DIM = 3
-    NUM_CARD_TYPES = 110  # Total number of unique cards in the game
-    CARD_CONTINUOUS_DIM = 4  # [x, y, hp_ratio, is_enemy]
+    # Example Usage
+    FIXED_INPUT_DIM = 9
+    NUM_CARD_TYPES = 110
+    CARD_CONTINUOUS_DIM = 4
     NUM_DISCRETE_ACTIONS = 5
     CONTINUOUS_ACTION_DIM = 2
     CARD_EMBEDDING_SIZE = 16
 
-    model: ActorCritic = ActorCritic(
+    # You would need a mock Bot object to run this example
+    class MockBot(Bot):
+        def __init__(self):
+            super().__init__(use_adb=False)
+        def screenshot(self) -> str: return "mock_screenshot.png"
+        def get_screen_size(self) -> tuple[int, int]: return (1080, 1920)
+        def play_card(self, card_index: int, x: float, y: float) -> None: pass
+        def click(self, x: int, y: int) -> None: pass
+
+    mock_bot = MockBot()
+    
+    model = ActorCritic(
+        bot=mock_bot,
         fixed_input_dim=FIXED_INPUT_DIM,
         num_card_types=NUM_CARD_TYPES,
         card_continuous_feature_dim=CARD_CONTINUOUS_DIM,
@@ -308,63 +290,6 @@ if __name__ == "__main__":
     print(model)
     print("\n" + "=" * 50 + "\n")
 
-    # --- Test with Dummy Data ---
-    BATCH_SIZE = 4
-    NUM_CARDS_ON_SCREEN = 6
-
-    fixed_data: torch.Tensor = torch.randn(BATCH_SIZE, FIXED_INPUT_DIM)
-    # Card IDs should be Long type for embedding layer
-    card_ids_data: torch.Tensor = torch.randint(
-        0, NUM_CARD_TYPES, (BATCH_SIZE, NUM_CARDS_ON_SCREEN)
-    )
-    card_continuous_data: torch.Tensor = torch.randn(
-        BATCH_SIZE, NUM_CARDS_ON_SCREEN, CARD_CONTINUOUS_DIM
-    )
-
-    print(
-        f"--- Testing Forward Pass with Batch Size: {BATCH_SIZE}, Num Cards: {NUM_CARDS_ON_SCREEN} ---"
-    )
-
-    discrete_dist: Categorical
-    continuous_dist: Normal
-    value: torch.Tensor
-    discrete_dist, continuous_dist, value = model(
-        fixed_data, card_ids_data, card_continuous_data
-    )
-
-    print(f"Discrete action distribution (sample shape): {discrete_dist.sample().shape}")
-    print(f"Continuous action distribution mean (shape): {continuous_dist.mean.shape}")
-    print(f"Critic value output (shape): {value.shape}")
-    print("\n" + "=" * 50 + "\n")
-
-    # --- Test action selection for a single state ---
-    print("--- Testing Action Selection for a Single State ---")
-
-    single_fixed_data: torch.Tensor = torch.randn(FIXED_INPUT_DIM)
-    single_card_ids: torch.Tensor = torch.randint(
-        0, NUM_CARD_TYPES, (3,)  # 3 cards on screen
-    )
-    single_card_continuous: torch.Tensor = torch.randn(3, CARD_CONTINUOUS_DIM)
-
-    discrete_act: int
-    continuous_act: np.ndarray[Any, Any]
-    discrete_act, continuous_act = model.select_action(
-        single_fixed_data, single_card_ids, single_card_continuous
-    )
-
-    print(f"Selected Discrete Action: {discrete_act}")
-    print(f"Selected Continuous Action (x, y): {continuous_act}")
-    print("\n" + "=" * 50 + "\n")
-
-    # --- Test with no cards on screen ---
-    print("--- Testing with No Cards on Screen ---")
-
-    no_card_ids: torch.Tensor = torch.empty(0, dtype=torch.long)
-    no_card_continuous: torch.Tensor = torch.empty(0)
-
-    discrete_act, continuous_act = model.select_action(
-        single_fixed_data, no_card_ids, no_card_continuous
-    )
-
-    print(f"Selected Discrete Action (no cards): {discrete_act}")
-    print(f"Selected Continuous Action (no cards): {continuous_act}")
+    # This example assumes you have a way to create a GameState object.
+    # The step method would be called in a loop within your main training script.
+    # For a full test, you would need to mock get_full_game_state and calculate_reward.

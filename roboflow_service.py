@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from inference import InferencePipeline
 import cv2
+import time # Import time for sleep
 
 load_dotenv() # Load environment variables from .env file
 
@@ -15,6 +16,9 @@ if not api_key:
 # Or re-initialized per call if input type changes or for isolated calls
 _pipeline_instance = None
 
+# Flag to signal that predictions have been received
+prediction_received = False
+
 def get_roboflow_predictions(image_path: str, display_image: bool = False) -> dict:
     """
     Sends an image to the Roboflow Inference API and returns the predictions.
@@ -26,12 +30,15 @@ def get_roboflow_predictions(image_path: str, display_image: bool = False) -> di
     Returns:
         dict: The prediction results from the Roboflow API.
     """
-    global _pipeline_instance
+    global prediction_received # Declare as global here
     predictions = {}
+    prediction_received = False # Reset flag for each call
 
     def _prediction_sink(result, video_frame):
         nonlocal predictions
-        predictions = result
+        global prediction_received # Corrected: use global for module-level variable
+        predictions = result["predictions"]
+        prediction_received = True # Signal that predictions have been received
         if display_image and result.get("output_image"):
             cv2.imshow("Workflow Image", result["output_image"].numpy_image)
             cv2.waitKey(1)
@@ -49,14 +56,17 @@ def get_roboflow_predictions(image_path: str, display_image: bool = False) -> di
 
     try:
         pipeline.start()
-        pipeline.join() # Wait for the pipeline to finish processing the single image
+        # Wait until predictions are received, then stop the pipeline
+        while not prediction_received:
+            time.sleep(0.1) # Check frequently
+
+        pipeline.stop() # Explicitly stop the pipeline once predictions are received
+        pipeline.join() # Ensure all threads are cleaned up
     except Exception as e:
         print(f"Error during Roboflow inference: {e}")
     finally:
-        # It's good practice to ensure resources are released if the pipeline is short-lived
-        # For a single image, the pipeline should naturally close after processing
-        pass 
-    
+        pass # The pipeline is now explicitly stopped and joined
+
     return predictions
 
 if __name__ == "__main__":

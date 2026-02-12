@@ -4,8 +4,8 @@ from time import sleep
 from adb_pywrapper.adb_device import AdbDevice
 
 from bot import Bot
-from vision import get_elixir, get_tower_healths, is_elixir_bar_visible
-
+from vision import get_full_game_state
+from game_state import GameState # Import GameState
 
 def main() -> None:
     """
@@ -25,26 +25,15 @@ def main() -> None:
 
     try:
         while True:
-            # 1. Get screenshot
-            screenshot_path = bot.screenshot()
-            if not os.path.exists(screenshot_path):
-                print(f"Error: Screenshot file not found at {screenshot_path}")
-                continue
+            # 1. Analyze screenshot and get the game state
+            game_state: GameState = get_full_game_state(bot)
 
-            # 2. Analyze screenshot
-            elixir = get_elixir(screenshot_path)
-            tower_healths = get_tower_healths(screenshot_path)
-            elixir_bar_visible = is_elixir_bar_visible(screenshot_path)
-
-            # 3. Print results
-            print(f"Elixir: {elixir}")
-            print(f"Tower Healths: {tower_healths}")
-            print(f"Elixir Bar Visible: {elixir_bar_visible}")
+            # 2. Print results using the __str__ method
+            print("--------------------")
+            print(game_state)
             
-            # 4. Clean up screenshot
-            os.remove(screenshot_path)
-
-            sleep(1)  # Wait 1 second before next capture
+            # The screenshot is cleaned up inside get_full_game_state
+            # sleep(1)  # Wait 1 second before next capture
 
     except KeyboardInterrupt:
         print("\nVision test stopped by user.")

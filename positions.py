@@ -1,28 +1,42 @@
+import numpy as np
+
 class BBox:
-    def __init__(self, x1: int, y1: int, x2: int, y2: int) -> None:
-        # (0, 0) is top left in emulator
-        self.x1: int = min(x1, x2)
-        self.y1: int = max(y1, y2)
-        self.x2: int = max(x1, x2)
-        self.y2: int = min(x1, x2)
+    """
+    Represents a bounding box.
+    (x1, y1) is the top-left corner.
+    (x2, y2) is the bottom-right corner.
+    """
+    def __init__(self, x1: int, y1: int, x2: int, y2: int):
+        self.x1 = x1
+        self.y1 = y1
+        self.x2 = x2
+        self.y2 = y2
 
-    def bl(self):
-        return (self.x1, self.y1)
+    @property
+    def width(self) -> int:
+        return self.x2 - self.x1
 
-    def br(self):
-        return (self.x2, self.y1)
+    @property
+    def height(self) -> int:
+        return self.y2 - self.y1
 
-    def tl(self):
-        return (self.x1, self.y2)
+    def to_xywh(self) -> tuple[int, int, int, int]:
+        return self.x1, self.y1, self.width, self.height
 
-    def tr(self):
-        return (self.x2, self.y2)
+    def to_numpy(self) -> np.ndarray:
+        return np.array([self.x1, self.y1, self.x2, self.y2])
 
     def pt(self, x: float, y: float):
         return (
-            int(self.x1 + x * (self.x2 - self.x1)),
-            int(self.y1 + y * (self.y2 - self.y1)),
+            int(self.x1 + x * self.width),
+            int(self.y1 + y * self.height),
         )
+
+    def __iter__(self):
+        yield self.x1
+        yield self.y1
+        yield self.x2
+        yield self.y2
 
 
 BATTLE = (700, 1350)
@@ -36,5 +50,5 @@ CARDS = [
 FIELD_CORNERS = BBox(300, 180, 1140, 1300)
 ALLY_CORNERS = BBox(300, 770, 1140, 1300)
 
-ELIXIR_BAR_BBOX = (484, 1674, 684, 38)
+ELIXIR_BAR_BBOX = BBox(484, 1674, 1168, 1712)
 
