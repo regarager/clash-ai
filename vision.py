@@ -240,7 +240,7 @@ def get_full_game_state(
     print(f"VISION: Tower Healths: {tower_healths}")
 
     screen_width, screen_height = bot.get_screen_size()
-    print("VISION: Getting object detections (Roboflow API call)...")
+    print("VISION: Getting object detections (YOLO local inference)...")
     detections = get_object_detections(screenshot_path, (screen_width, screen_height))
     print(f"VISION: Got {len(detections)} object detections.")
     
