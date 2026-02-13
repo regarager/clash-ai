@@ -1,6 +1,3 @@
-import os
-from time import sleep
-
 from adb_pywrapper.adb_device import AdbDevice
 
 from bot import Bot
