@@ -100,6 +100,10 @@ class ActorCritic(nn.Module):
         current_state = get_full_game_state(self.bot)
         print(f"Current Game State: {current_state}")
 
+        if not current_state.detections:
+            print("AGENT DEBUG: Skipping step due to zero detections from vision module.")
+            return current_state # Skip the rest of the step
+
         if previous_state is None:
             return current_state
             
