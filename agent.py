@@ -129,7 +129,7 @@ class ActorCritic(nn.Module):
         else:
             print("Agent chose to do nothing (action 4).")
 
-        sleep(2)  # Wait for the game to update after an action
+        sleep(1)  # Wait for the game to update after an action
         print("AGENT: Finished waiting.")
 
         # 4. Calculate reward based on state change

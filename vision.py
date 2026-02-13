@@ -95,6 +95,7 @@ def _get_bar_fill_percentage(
 
     return filled_pixels / total_pixels
 
+
 def get_elixir(image_path: str) -> int:
     """
     Calculates the current elixir count from a screenshot of the game.
@@ -174,42 +175,43 @@ def get_tower_healths(image_path: str) -> dict[str, float]:
     # HSV color ranges for the EMPTY part of the health bars.
     # empty ally: #425170 -> BGR(66, 81, 112) -> HSV (approx 111, 41, 44)
 
-    empty_ally_color_range = [(np.array([100, 100, 60]), np.array([120, 255, 85]))]
-    empty_ally_king_color_range = [(np.array([10, 65, 75]), np.array([20, 75, 85]))]
-    empty_enemy_color_range = [(np.array([144, 88, 35]), np.array([184, 148, 95]))]
-    empty_enemy_king_color_range = [(np.array([10, 120, 45]), np.array([20, 130, 55]))]
+    TOLERANCE = 5
+    ally_color = np.array([99, 140, 255])
+    ally_color_range = [(ally_color - TOLERANCE, ally_color + TOLERANCE)]
+
+    enemy_color = np.array([171, 209, 229])
+    enemy_color_range = [(enemy_color - TOLERANCE, enemy_color + TOLERANCE)]
+
+    ally_king_empty_color = np.array([13, 71, 112])
+    enemy_king_empty_color = np.array([13, 127, 76])
+    ally_king_color_range = [(ally_king_empty_color - TOLERANCE, ally_king_empty_color + TOLERANCE)]
+    enemy_king_color_range = [(enemy_king_empty_color - TOLERANCE, enemy_king_empty_color + TOLERANCE)]
 
     for name, bbox in TOWER_BBOXES.items():
         x, y, w, h = bbox.to_xywh()
         health_bar_image = image[y : y + h, x : x + w]
 
-        if "ally" in name:
-            if "king" in name:
-                color_range = empty_ally_king_color_range
-            else:
-                color_range = empty_ally_color_range
-        else:  # enemy
-            if "king" in name:
-                color_range = empty_enemy_king_color_range
-            else:
-                color_range = empty_enemy_color_range
-
         print("calculating for " + name)
-        empty_fill_ratio = _get_bar_fill_percentage(health_bar_image, color_range)
 
-        if empty_fill_ratio is None:
-            if "king_tower" in name:
-                # King towers have no health bar when full. If no empty color found, assume 100%.
-                health = 1.0
+        debug_color_range(image_path, bbox, name)
+
+        if "king" in name:
+            if "ally" in name:
+                color_range = ally_king_color_range
             else:
-                # For princess towers, if bar can't be processed, assume 0 health as a fallback
-                health = 0.0
-            print("WARN: empty_fill_ratio is None")
-        else:
-            # Health is the complement of the empty ratio
-            health = 1.0 - empty_fill_ratio
+                color_range = enemy_king_color_range
+            empty_fill_ratio = _get_bar_fill_percentage(health_bar_image, color_range)
 
-        tower_healths[name] = health
+            tower_healths[name] = 1.0 - (empty_fill_ratio or 0.0)
+        else:
+            if "ally" in name:
+                color_range = ally_color_range
+            else:  # enemy
+                color_range = enemy_color_range
+
+            fill_ratio = _get_bar_fill_percentage(health_bar_image, color_range)
+
+            tower_healths[name] = fill_ratio
 
     return tower_healths
 
@@ -475,21 +477,39 @@ def calculate_reward(
     reward = 0.0
 
     # --- 1. Tower Health Rewards/Penalties ---
-    if current_state.tower_healths and previous_state.tower_healths:
-        for tower_name, current_health in current_state.tower_healths.items():
-            previous_health = previous_state.tower_healths.get(
-                tower_name, current_health
-            )
-            health_delta = current_health - previous_health
-            if "enemy" in tower_name and health_delta < 0:
-                reward += (
-                    abs(health_delta) * 15
-                )  # Increased reward for damaging enemy towers
-            elif "ally" in tower_name and health_delta < 0:
-                reward -= (
-                    abs(health_delta) * 15
-                )  # Increased penalty for ally towers taking damage
+    for tower_name, current_health in current_state.tower_healths.items():
+        previous_health = previous_state.tower_healths.get(tower_name, current_health)
+        health_delta = current_health - previous_health
+        if "enemy" in tower_name and health_delta < 0:
+            reward += (
+                abs(health_delta) * 15
+            )  # Increased reward for damaging enemy towers
+        elif "ally" in tower_name and health_delta < 0:
+            reward -= (
+                abs(health_delta) * 15 + 1  # heuristic
+            )  # Increased penalty for ally towers taking damage
 
+    if current_state.tower_healths and previous_state.tower_healths:
+        prev_difference = 0
+        current_difference = 0
+
+        for tower_name, current_health in current_state.tower_healths.items():
+            if "king" in tower_name:
+                continue
+
+            if "enemy" in tower_name:
+                prev_difference -= previous_state.tower_healths.get(
+                    tower_name, current_health
+                )
+                current_difference -= current_health 
+            else:
+                prev_difference += previous_state.tower_healths.get(
+                    tower_name, current_health
+                )
+                current_difference += current_health 
+
+        reward += 5 * (current_difference - prev_difference - 0.2)
+            
     # --- 2. Unit Change Rewards/Penalties ---
     current_ally_units = {
         d["class"] for d in current_state.detections if not d.get("is_enemy")
@@ -517,10 +537,13 @@ def calculate_reward(
     if elixir_advantage > 0:
         reward += elixir_advantage * 0.1  # Small reward for gaining elixir
 
+    elixir_hold_cost = current_state.elixir * 0.1
+    reward -= elixir_hold_cost
+
     # --- 4. Elixir Overflow Penalty ---
     if current_state.elixir == 10:
-        penalty = -5.0
-        reward += penalty
+        penalty = 50.0
+        reward -= penalty
         print(f"Calculated reward: Elixir overflow penalty applied: {penalty}")
 
     # --- 5. Win/Loss Condition ---

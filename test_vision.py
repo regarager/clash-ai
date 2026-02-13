@@ -33,7 +33,7 @@ def main() -> None:
             print(game_state)
             
             # The screenshot is cleaned up inside get_full_game_state
-            sleep(1)  # Wait 1 second before next capture
+            # sleep(1)  # Wait 1 second before next capture
 
     except KeyboardInterrupt:
         print("\nVision test stopped by user.")
