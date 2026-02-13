@@ -343,7 +343,13 @@ def calculate_reward(
     if elixir_advantage > 0:
         reward += elixir_advantage * 0.1 # Small reward for gaining elixir
 
-    # --- 4. Win/Loss Condition ---
+    # --- 4. Elixir Overflow Penalty ---
+    if current_state.elixir == 10:
+        penalty = -5.0
+        reward += penalty
+        print(f"Calculated reward: Elixir overflow penalty applied: {penalty}")
+
+    # --- 5. Win/Loss Condition ---
     if current_state.tower_healths:
         if current_state.tower_healths.get("enemy_king_tower", 1.0) <= 0.01:
             reward += 100 # Big reward for winning
