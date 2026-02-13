@@ -165,7 +165,7 @@ def get_object_detections(screenshot_path: str, bot_screen_size: tuple[int, int]
     screen_width, screen_height = bot_screen_size
 
     try:
-        raw_predictions = get_roboflow_predictions(screenshot_path) # Now directly returns a list of prediction dicts
+        raw_predictions = get_yolo_predictions(screenshot_path) # Now directly returns a list of prediction dicts
 
         if not raw_predictions:
             print("VISION WARN: No object detections received from Roboflow (or Roboflow error occurred). Proceeding without detections.")
