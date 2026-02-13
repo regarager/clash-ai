@@ -6,11 +6,11 @@ import cv2
 import numpy as np
 import torch
 
-from bot import Bot
-from cards import CARDS, TOWERS
-from game_state import GameState
-from local_yolo_service import get_yolo_predictions
-from positions import ELIXIR_BAR_BBOX, TOWER_BBOXES, BBox
+from .bot import Bot
+from .cards import CARDS, TOWERS
+from .game_state import GameState
+from .local_yolo_service import get_yolo_predictions
+from .positions import ELIXIR_BAR_BBOX, TOWER_BBOXES, BBox
 
 # --- Model and State Configuration Constants (moved from main.py) ---
 FIXED_INPUT_DIM = 9  # Elixir, 6 Tower Healths, Ally Unit Count, Enemy Unit Count

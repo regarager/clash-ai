@@ -7,9 +7,9 @@ import torch.nn as nn
 from torch.distributions import Categorical, Normal
 from typing_extensions import override
 
-from vision import get_full_game_state, calculate_reward
-from bot import Bot
-from game_state import GameState
+from .vision import get_full_game_state, calculate_reward
+from .bot import Bot
+from .game_state import GameState
 
 __all__ = ["ActorCritic"]
 

@@ -1,6 +1,6 @@
 from time import time, sleep
 from adb_pywrapper.adb_device import AdbDevice
-from positions import BATTLE, CARDS, ALLY_CORNERS
+from .positions import BATTLE, CARDS, ALLY_CORNERS
 
 
 class Bot:
