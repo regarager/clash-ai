@@ -11,3 +11,4 @@ wheels/
 .env
 clash-ai-8/
 screenshots/
+*.pth
