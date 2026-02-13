@@ -94,9 +94,11 @@ class ActorCritic(nn.Module):
         Performs one step of the game loop: gets state, selects action,
         calculates reward, and updates the agent.
         """
+        print("\\n--- Agent Step Initiated ---")
+
         # 1. Get current game state
         current_state = get_full_game_state(self.bot)
-        print(current_state) # Print the current game state
+        print(f"Current Game State: {current_state}")
 
         if previous_state is None:
             return current_state
@@ -107,24 +109,35 @@ class ActorCritic(nn.Module):
             current_state.card_ids,
             current_state.card_continuous_features,
         )
+        print(f"Agent selected Discrete Action: {d_action}, Continuous Action: {c_action}")
 
+        # If no objects are detected, force "do nothing" action
+        if current_state.card_ids.nelement() == 0 and d_action < 4:
+            print("AGENT INFO: No objects detected. Overriding action to 'do nothing' (action 4).")
+            d_action = 4 # Force "do nothing" action
+            
         # 3. Take action
         if d_action < 4:  # Assuming actions 0-3 are "play card"
-            print(f"Agent chose to play card {d_action} at position {c_action}")
             scaled_x = (c_action[0] + 1) / 2
             scaled_y = (c_action[1] + 1) / 2
+            print(f"Playing card {d_action} at scaled position ({scaled_x:.2f}, {scaled_y:.2f})")
             self.bot.play_card(d_action, scaled_x, scaled_y)
         else:
             print("Agent chose to do nothing (action 4).")
 
         sleep(2)  # Wait for the game to update after an action
+        print("AGENT: Finished waiting.")
 
         # 4. Calculate reward based on state change
+        print("AGENT: Calculating reward...")
         reward = calculate_reward(current_state, previous_state)
         self.rewards.append(reward)
+        print(f"AGENT: Reward calculated: {reward}")
 
         # 5. Update the agent
+        print("AGENT: Updating agent (training step)...")
         self.update()
+        print("AGENT: Agent update complete.")
 
         return current_state
 
@@ -205,6 +218,17 @@ class ActorCritic(nn.Module):
             return
 
         rewards = torch.tensor(self.rewards, dtype=torch.float32)
+        
+        # If all rewards are the same (e.g., all zeros), stddev will be 0.
+        # This can lead to NaNs in normalized returns and subsequent loss calculation.
+        # Skip update if rewards are essentially constant, as there's no learning signal.
+        if len(rewards) < 2 or rewards.std() < 1e-6: # Check if std is too small or only one reward
+            print(f"AGENT WARNING: Skipping update due to constant or insufficient rewards. Stddev: {rewards.std().item()}")
+            self.rewards.clear()
+            self.log_probs.clear()
+            self.state_values.clear()
+            return
+        
         log_probs = torch.stack(self.log_probs)
         state_values = torch.stack(self.state_values).squeeze()
 
@@ -214,14 +238,27 @@ class ActorCritic(nn.Module):
             discounted_reward = r + gamma * discounted_reward
             returns.insert(0, discounted_reward)
         returns_tensor = torch.tensor(returns)
-        returns_tensor = (returns_tensor - returns_tensor.mean()) / (
-            returns_tensor.std() + 1e-9
-        )
+        
+        # Normalize returns
+        # Add a small epsilon to the std to prevent division by zero, even if std is already 1e-9
+        returns_std = returns_tensor.std()
+        if returns_std == 0: # Ensure we don't divide by zero if all returns are identical
+            returns_tensor = returns_tensor - returns_tensor.mean() # Just center it
+        else:
+            returns_tensor = (returns_tensor - returns_tensor.mean()) / (returns_std + 1e-9)
 
         advantage = returns_tensor - state_values.detach()
         actor_loss = -(log_probs * advantage).mean()
         critic_loss = nn.functional.mse_loss(state_values, returns_tensor)
         loss = actor_loss + 0.5 * critic_loss
+
+        # Check for NaNs in loss before backpropagation
+        if torch.isnan(loss):
+            print("AGENT WARNING: NaN detected in loss. Skipping backpropagation and resetting buffers.")
+            self.rewards.clear()
+            self.log_probs.clear()
+            self.state_values.clear()
+            return
 
         self.optimizer.zero_grad()
         loss.backward()

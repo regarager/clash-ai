@@ -155,50 +155,54 @@ def is_game_active(image_path: str) -> bool:
 def get_object_detections(screenshot_path: str, bot_screen_size: tuple[int, int]) -> list[dict[str, Any]]:
     """
     Gets object detections from Roboflow for the given screenshot.
+    
+    WARN: This function allows the agent to continue execution without object
+    detections if Roboflow encounters an error or returns no predictions.
+    This behavior should be deprecated in a future, more robust version
+    where object detection is critical for decision-making.
     """
     detections: list[dict[str, Any]] = []
+    screen_width, screen_height = bot_screen_size
+
     try:
-        roboflow_response = get_roboflow_predictions(screenshot_path)
-        
-        # Extract the Detections object
-        roboflow_detections_obj = roboflow_response.get("predictions")
+        raw_predictions = get_roboflow_predictions(screenshot_path) # Now directly returns a list of prediction dicts
 
-        if roboflow_detections_obj is not None:
-            screen_width, screen_height = bot_screen_size
-            for i in range(len(roboflow_detections_obj.xyxy)):
-                x1, y1, x2, y2 = roboflow_detections_obj.xyxy[i]
-                
-                # Calculate center x, y, width, height
-                x_center = (x1 + x2) / 2
-                y_center = (y1 + y2) / 2
-                width = x2 - x1
-                height = y2 - y1
+        if not raw_predictions:
+            print("VISION WARN: No object detections received from Roboflow (or Roboflow error occurred). Proceeding without detections.")
+            return [] # Explicitly return empty list
 
-                # Ensure 'class_name' exists in data
-                class_name = "unknown"
-                if "class_name" in roboflow_detections_obj.data and i < len(roboflow_detections_obj.data["class_name"]):
-                    class_name = roboflow_detections_obj.data["class_name"][i]
+        for prediction in raw_predictions:
+            # Ensure required keys exist
+            if not all(k in prediction for k in ["x", "y", "width", "height", "class", "confidence", "class_id"]):
+                print(f"VISION WARNING: Malformed prediction received: {prediction}. Skipping.")
+                continue
 
-                # Store processed info back into detection for later use
-                is_enemy = class_name.startswith("enemy-")
-                base_name = class_name.removeprefix("enemy-").removeprefix("ally-")
+            x_center = prediction["x"]
+            y_center = prediction["y"]
+            width = prediction["width"]
+            height = prediction["height"]
+            class_name = prediction["class"]
+            
+            # Store processed info back into detection for later use
+            is_enemy = class_name.startswith("enemy-")
+            base_name = class_name.removeprefix("enemy-").removeprefix("ally-")
 
-                detections.append(
-                    {
-                        "x": x_center,
-                        "y": y_center,
-                        "width": width,
-                        "height": height,
-                        "class": class_name,
-                        "confidence": float(roboflow_detections_obj.confidence[i]),
-                        "class_id": int(roboflow_detections_obj.class_id[i]),
-                        "is_enemy": is_enemy,
-                        "base_name": base_name,
-                    }
-                )
+            detections.append(
+                {
+                    "x": x_center,
+                    "y": y_center,
+                    "width": width,
+                    "height": height,
+                    "class": class_name,
+                    "confidence": float(prediction["confidence"]),
+                    "class_id": int(prediction["class_id"]),
+                    "is_enemy": is_enemy,
+                    "base_name": base_name,
+                }
+            )
     except Exception as e:
-        print(f"Error during Roboflow object detection: {e}")
-        # Return empty detections if an error occurs
+        print(f"VISION ERROR: An unexpected error occurred during object detection processing: {e}")
+        # Return empty detections if any unexpected error occurs during processing
         return [] 
     
     return detections
@@ -210,7 +214,11 @@ def get_full_game_state(
     Gets the current game state by taking a screenshot, running object detection,
     and packaging all information into a GameState object.
     """
+    print("VISION: Starting get_full_game_state.")
+    print("VISION: Taking screenshot...")
     screenshot_path = bot.screenshot()
+    print(f"VISION: Screenshot taken: {screenshot_path}")
+
     if not os.path.exists(screenshot_path):
         print(f"Error: Screenshot file not found at {screenshot_path}")
         return GameState(
@@ -223,11 +231,20 @@ def get_full_game_state(
         )
 
     # 1. Get Elixir, Tower Healths, and Object Detections
+    print("VISION: Getting elixir...")
     elixir = get_elixir(screenshot_path)
+    print(f"VISION: Elixir: {elixir}")
+
+    print("VISION: Getting tower healths...")
     tower_healths = get_tower_healths(screenshot_path)
+    print(f"VISION: Tower Healths: {tower_healths}")
+
     screen_width, screen_height = bot.get_screen_size()
+    print("VISION: Getting object detections (Roboflow API call)...")
     detections = get_object_detections(screenshot_path, (screen_width, screen_height))
+    print(f"VISION: Got {len(detections)} object detections.")
     
+    print(f"VISION: Deleting screenshot: {screenshot_path}")
     os.remove(screenshot_path)  # Clean up screenshot
 
     # 2. Construct fixed inputs for the agent
@@ -271,6 +288,7 @@ def get_full_game_state(
     card_continuous_features = torch.tensor(card_continuous_features_list, dtype=torch.float32) if card_continuous_features_list else torch.empty(0)
 
     # 4. Create and return GameState object
+    print("VISION: Finished get_full_game_state.")
     return GameState(
         elixir=elixir,
         tower_healths=tower_healths,

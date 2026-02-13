@@ -1,8 +1,8 @@
 import os
 from dotenv import load_dotenv
-from inference import InferencePipeline
-import cv2
-import time # Import time for sleep
+from inference_sdk import InferenceHTTPClient # Import InferenceHTTPClient
+import time # Keep for rate limiting
+from typing import Any # Import Any for type hinting
 
 load_dotenv() # Load environment variables from .env file
 
@@ -10,65 +10,53 @@ load_dotenv() # Load environment variables from .env file
 api_key = os.getenv("ROBOFLOW_API_KEY")
 
 if not api_key:
+    print("ROBOFLOW: ROBOFLOW_API_KEY not found in environment variables.")
     raise ValueError("ROBOFLOW_API_KEY not found in environment variables. Please set it in a .env file.")
+else:
+    print(f"ROBOFLOW: Using API Key (first 5 chars): {api_key[:5]}*****")
 
-# Global pipeline instance (can be initialized once if preferred for performance)
-# Or re-initialized per call if input type changes or for isolated calls
-_pipeline_instance = None
+# Initialize the Roboflow InferenceHTTPClient globally
+CLIENT = InferenceHTTPClient(
+    api_url="https://serverless.roboflow.com",
+    api_key=api_key
+)
 
-# Flag to signal that predictions have been received
-prediction_received = False
+# Model ID to be used for inference
+MODEL_ID = "clash-ai-kimrx/10"
 
-def get_roboflow_predictions(image_path: str, display_image: bool = False) -> dict:
-    """
-    Sends an image to the Roboflow Inference API and returns the predictions.
+# Rate limiting variables
+_last_roboflow_request_time = 0.0
+MIN_ROBOFLOW_REQUEST_INTERVAL = 2.0 # seconds between Roboflow API calls
 
-    Args:
-        image_path (str): The path to the image file to analyze.
-        display_image (bool): Whether to display the workflow image using OpenCV.
+def _respect_roboflow_rate_limit():
+    global _last_roboflow_request_time
+    time_since_last_request = time.monotonic() - _last_roboflow_request_time
 
-    Returns:
-        dict: The prediction results from the Roboflow API.
-    """
-    global prediction_received # Declare as global here
-    predictions = {}
-    prediction_received = False # Reset flag for each call
+    if time_since_last_request < MIN_ROBOFLOW_REQUEST_INTERVAL:
+        sleep_duration = MIN_ROBOFLOW_REQUEST_INTERVAL - time_since_last_request
+        print(f"ROBOFLOW: Rate limiting - waiting for {sleep_duration:.2f} seconds.")
+        time.sleep(sleep_duration)
+    
+    _last_roboflow_request_time = time.monotonic()
 
-    def _prediction_sink(result, video_frame):
-        nonlocal predictions
-        global prediction_received # Corrected: use global for module-level variable
-        predictions = result["predictions"]
-        prediction_received = True # Signal that predictions have been received
-        if display_image and result.get("output_image"):
-            cv2.imshow("Workflow Image", result["output_image"].numpy_image)
-            cv2.waitKey(1)
+def get_roboflow_predictions(image_path: str, display_image: bool = False) -> list[dict[str, Any]]: # Change return type hint
+    _respect_roboflow_rate_limit() # Enforce rate limit before making the request
 
-    # Initialize pipeline for image processing (setting video_reference to image_path)
-    # Re-initialize each time to handle different image paths effectively
-    pipeline = InferencePipeline.init_with_workflow(
-        api_key=api_key,
-        workspace_name="stuff-m0fm7",
-        workflow_id="custom-workflow",
-        video_reference=image_path, # Process a single image file
-        max_fps=1, # Only one frame (the image) will be processed
-        on_prediction=_prediction_sink
-    )
+    print(f"ROBOFLOW: Making request with model {MODEL_ID} for image: {image_path}")
 
     try:
-        pipeline.start()
-        # Wait until predictions are received, then stop the pipeline
-        while not prediction_received:
-            time.sleep(0.1) # Check frequently
+        result = CLIENT.infer(image_path, model_id=MODEL_ID)
 
-        pipeline.stop() # Explicitly stop the pipeline once predictions are received
-        pipeline.join() # Ensure all threads are cleaned up
+        if result and "predictions" in result: # Check if result is not empty and has a 'predictions' key
+            actual_predictions = result["predictions"]
+            print(f"ROBOFLOW: Request successful. Got {len(actual_predictions)} predictions.")
+            return actual_predictions # <--- Return the list of actual predictions
+        else:
+            print(f"ROBOFLOW WARNING: No 'predictions' key or empty predictions returned from CLIENT.infer(). Result: {result}")
+            return [] # <--- Return empty list directly
     except Exception as e:
-        print(f"Error during Roboflow inference: {e}")
-    finally:
-        pass # The pipeline is now explicitly stopped and joined
-
-    return predictions
-
+        print(f"ROBOFLOW ERROR: An error occurred during Roboflow inference: {e}")
+        return [] # <--- Return empty list on error
 if __name__ == "__main__":
     # Example usage (for testing this module directly)
     print("This module is intended to be imported as a service.")
