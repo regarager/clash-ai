@@ -476,19 +476,6 @@ def calculate_reward(
     """
     reward = 0.0
 
-    # --- 1. Tower Health Rewards/Penalties ---
-    for tower_name, current_health in current_state.tower_healths.items():
-        previous_health = previous_state.tower_healths.get(tower_name, current_health)
-        health_delta = current_health - previous_health
-        if "enemy" in tower_name and health_delta < 0:
-            reward += (
-                abs(health_delta) * 15
-            )  # Increased reward for damaging enemy towers
-        elif "ally" in tower_name and health_delta < 0:
-            reward -= (
-                abs(health_delta) * 15 + 1  # heuristic
-            )  # Increased penalty for ally towers taking damage
-
     if current_state.tower_healths and previous_state.tower_healths:
         prev_difference = 0
         current_difference = 0
@@ -508,7 +495,7 @@ def calculate_reward(
                 )
                 current_difference += current_health 
 
-        reward += 5 * (current_difference - prev_difference - 0.2)
+        reward += 100 * (current_difference - prev_difference - 0.2)
             
     # --- 2. Unit Change Rewards/Penalties ---
     current_ally_units = {
@@ -549,9 +536,9 @@ def calculate_reward(
     # --- 5. Win/Loss Condition ---
     if current_state.tower_healths:
         if current_state.tower_healths.get("enemy_king_tower", 1.0) <= 0.01:
-            reward += 100  # Big reward for winning
+            reward += 500  # Big reward for winning
         if current_state.tower_healths.get("ally_king_tower", 1.0) <= 0.01:
-            reward -= 100  # Big penalty for losing
+            reward -= 500  # Big penalty for losing
 
     if reward != 0.0:
         print(f"Calculated reward: {reward}")
