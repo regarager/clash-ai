@@ -50,7 +50,7 @@ class Bot:
                 width = int(dimensions[0])
                 height = int(dimensions[1])
                 return width, height
-        print(f"Warning: Could not parse screen size from adb output: {output}. Defaulting to 1920x1080.")
+        print(
+            f"Warning: Could not parse screen size from adb output: {output}. Defaulting to 1920x1080."
+        )
         return 1920, 1080
-
-

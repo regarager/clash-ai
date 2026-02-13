@@ -184,8 +184,12 @@ def get_tower_healths(image_path: str) -> dict[str, float]:
 
     ally_king_empty_color = np.array([13, 71, 112])
     enemy_king_empty_color = np.array([13, 127, 76])
-    ally_king_color_range = [(ally_king_empty_color - TOLERANCE, ally_king_empty_color + TOLERANCE)]
-    enemy_king_color_range = [(enemy_king_empty_color - TOLERANCE, enemy_king_empty_color + TOLERANCE)]
+    ally_king_color_range = [
+        (ally_king_empty_color - TOLERANCE, ally_king_empty_color + TOLERANCE)
+    ]
+    enemy_king_color_range = [
+        (enemy_king_empty_color - TOLERANCE, enemy_king_empty_color + TOLERANCE)
+    ]
 
     for name, bbox in TOWER_BBOXES.items():
         x, y, w, h = bbox.to_xywh()
@@ -488,15 +492,15 @@ def calculate_reward(
                 prev_difference -= previous_state.tower_healths.get(
                     tower_name, current_health
                 )
-                current_difference -= current_health 
+                current_difference -= current_health
             else:
                 prev_difference += previous_state.tower_healths.get(
                     tower_name, current_health
                 )
-                current_difference += current_health 
+                current_difference += current_health
 
         reward += 100 * (current_difference - prev_difference - 0.2)
-            
+
     # --- 2. Unit Change Rewards/Penalties ---
     current_ally_units = {
         d["class"] for d in current_state.detections if not d.get("is_enemy")

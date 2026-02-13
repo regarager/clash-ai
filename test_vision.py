@@ -5,7 +5,8 @@ from adb_pywrapper.adb_device import AdbDevice
 
 from bot import Bot
 from vision import get_full_game_state
-from game_state import GameState # Import GameState
+from game_state import GameState  # Import GameState
+
 
 def main() -> None:
     """
@@ -31,7 +32,7 @@ def main() -> None:
             # 2. Print results using the __str__ method
             print("--------------------")
             print(game_state)
-            
+
             # The screenshot is cleaned up inside get_full_game_state
             # sleep(1)  # Wait 1 second before next capture
 
@@ -41,4 +42,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-

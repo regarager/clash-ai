@@ -66,9 +66,17 @@ TOWER_HEALTH_HEIGHT = 2  # purposefully less to avoid text
 
 TOWER_BBOXES = {
     "ally_king_tower": BBox.from_xywh(663, 1309, 144, TOWER_HEALTH_HEIGHT),
-    "ally_left_princess_tower": BBox.from_xywh(423, 1077, TOWER_HEALTH_WIDTH, TOWER_HEALTH_HEIGHT),
-    "ally_right_princess_tower": BBox.from_xywh(936, 1077, TOWER_HEALTH_WIDTH, TOWER_HEALTH_HEIGHT),
+    "ally_left_princess_tower": BBox.from_xywh(
+        423, 1077, TOWER_HEALTH_WIDTH, TOWER_HEALTH_HEIGHT
+    ),
+    "ally_right_princess_tower": BBox.from_xywh(
+        936, 1077, TOWER_HEALTH_WIDTH, TOWER_HEALTH_HEIGHT
+    ),
     "enemy_king_tower": BBox.from_xywh(663, 65, 144, TOWER_HEALTH_HEIGHT),
-    "enemy_left_princess_tower": BBox.from_xywh(423, 264, TOWER_HEALTH_WIDTH, TOWER_HEALTH_HEIGHT),
-    "enemy_right_princess_tower": BBox.from_xywh(936, 264, TOWER_HEALTH_WIDTH, TOWER_HEALTH_HEIGHT),
+    "enemy_left_princess_tower": BBox.from_xywh(
+        423, 264, TOWER_HEALTH_WIDTH, TOWER_HEALTH_HEIGHT
+    ),
+    "enemy_right_princess_tower": BBox.from_xywh(
+        936, 264, TOWER_HEALTH_WIDTH, TOWER_HEALTH_HEIGHT
+    ),
 }
