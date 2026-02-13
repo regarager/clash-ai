@@ -4,7 +4,7 @@ import numpy as np
 import os
 import torch
 
-from roboflow_service import get_roboflow_predictions
+from local_yolo_service import get_yolo_predictions
 from positions import ELIXIR_BAR_BBOX, BBox
 from game_state import GameState
 from bot import Bot

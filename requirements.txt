@@ -1,7 +1,6 @@
-inference
+ultralytics
 opencv-python
 python-dotenv
-roboflow
 torch
 ruff
 adb-pywrapper
