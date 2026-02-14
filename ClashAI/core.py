@@ -63,4 +63,3 @@ def run() -> None:
     finally:
         # Save the model on exit
         agent.save_model()
-

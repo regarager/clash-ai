@@ -168,7 +168,7 @@ def get_tower_healths(image_path: str) -> dict[str, float]:
     if image is None:
         return {}
 
-    _debug_save_health_bboxes(image_path, TOWER_BBOXES)
+    # _debug_save_health_bboxes(image_path, TOWER_BBOXES)
 
     tower_healths = {}
 
@@ -197,7 +197,7 @@ def get_tower_healths(image_path: str) -> dict[str, float]:
 
         print("calculating for " + name)
 
-        debug_color_range(image_path, bbox, name)
+        # debug_color_range(image_path, bbox, name)
 
         if "king" in name:
             if "ally" in name:
@@ -499,7 +499,7 @@ def calculate_reward(
                 )
                 current_difference += current_health
 
-        reward += 100 * (current_difference - prev_difference - 0.2)
+        reward += 100 * (current_difference - prev_difference)
 
     # --- 2. Unit Change Rewards/Penalties ---
     current_ally_units = {
@@ -517,22 +517,14 @@ def calculate_reward(
 
     # Reward for destroying enemy units
     destroyed_enemies = len(previous_enemy_units - current_enemy_units)
-    reward += destroyed_enemies * 2.0
+    reward += destroyed_enemies * 5.0
 
     # Penalty for losing ally units
     lost_allies = len(previous_ally_units - current_ally_units)
-    reward -= lost_allies * 2.0
-
-    # --- 3. Elixir Advantage Reward ---
-    elixir_advantage = current_state.elixir - previous_state.elixir
-    if elixir_advantage > 0:
-        reward += elixir_advantage * 0.1  # Small reward for gaining elixir
-
-    elixir_hold_cost = current_state.elixir * 0.1
-    reward -= elixir_hold_cost
+    reward -= lost_allies * 5.0
 
     # --- 4. Elixir Overflow Penalty ---
-    if current_state.elixir == 10:
+    if current_state.elixir >= 8:
         penalty = 50.0
         reward -= penalty
         print(f"Calculated reward: Elixir overflow penalty applied: {penalty}")

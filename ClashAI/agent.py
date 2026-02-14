@@ -1,5 +1,5 @@
-from typing import Any, Optional
 from time import sleep
+from typing import Any, Optional
 
 import numpy as np
 import torch
@@ -7,9 +7,9 @@ import torch.nn as nn
 from torch.distributions import Categorical, Normal
 from typing_extensions import override
 
-from .vision import get_full_game_state, calculate_reward
 from .bot import Bot
 from .game_state import GameState
+from .vision import calculate_reward, get_full_game_state
 
 __all__ = ["ActorCritic"]
 
@@ -123,10 +123,7 @@ class ActorCritic(nn.Module):
 
         # If no objects are detected, force "do nothing" action
         if current_state.card_ids.nelement() == 0 and d_action < 4:
-            print(
-                "AGENT INFO: No objects detected. Overriding action to 'do nothing' (action 4)."
-            )
-            d_action = 4  # Force "do nothing" action
+            print("AGENT WARN: No objects detected.")
 
         # 3. Take action
         if d_action < 4:  # Assuming actions 0-3 are "play card"
