@@ -6,11 +6,11 @@ import cv2
 import numpy as np
 import torch
 
-from bot import Bot
-from cards import CARDS, TOWERS
-from game_state import GameState
-from local_yolo_service import get_yolo_predictions
-from positions import ELIXIR_BAR_BBOX, TOWER_BBOXES, BBox
+from .bot import Bot
+from .cards import CARDS, TOWERS
+from .game_state import GameState
+from .local_yolo_service import get_yolo_predictions
+from .positions import ELIXIR_BAR_BBOX, TOWER_BBOXES, BBox
 
 # --- Model and State Configuration Constants (moved from main.py) ---
 FIXED_INPUT_DIM = 9  # Elixir, 6 Tower Healths, Ally Unit Count, Enemy Unit Count
@@ -168,7 +168,7 @@ def get_tower_healths(image_path: str) -> dict[str, float]:
     if image is None:
         return {}
 
-    _debug_save_health_bboxes(image_path, TOWER_BBOXES)
+    # _debug_save_health_bboxes(image_path, TOWER_BBOXES)
 
     tower_healths = {}
 
@@ -184,8 +184,12 @@ def get_tower_healths(image_path: str) -> dict[str, float]:
 
     ally_king_empty_color = np.array([13, 71, 112])
     enemy_king_empty_color = np.array([13, 127, 76])
-    ally_king_color_range = [(ally_king_empty_color - TOLERANCE, ally_king_empty_color + TOLERANCE)]
-    enemy_king_color_range = [(enemy_king_empty_color - TOLERANCE, enemy_king_empty_color + TOLERANCE)]
+    ally_king_color_range = [
+        (ally_king_empty_color - TOLERANCE, ally_king_empty_color + TOLERANCE)
+    ]
+    enemy_king_color_range = [
+        (enemy_king_empty_color - TOLERANCE, enemy_king_empty_color + TOLERANCE)
+    ]
 
     for name, bbox in TOWER_BBOXES.items():
         x, y, w, h = bbox.to_xywh()
@@ -193,7 +197,7 @@ def get_tower_healths(image_path: str) -> dict[str, float]:
 
         print("calculating for " + name)
 
-        debug_color_range(image_path, bbox, name)
+        # debug_color_range(image_path, bbox, name)
 
         if "king" in name:
             if "ally" in name:
@@ -488,15 +492,15 @@ def calculate_reward(
                 prev_difference -= previous_state.tower_healths.get(
                     tower_name, current_health
                 )
-                current_difference -= current_health 
+                current_difference -= current_health
             else:
                 prev_difference += previous_state.tower_healths.get(
                     tower_name, current_health
                 )
-                current_difference += current_health 
+                current_difference += current_health
 
-        reward += 100 * (current_difference - prev_difference - 0.2)
-            
+        reward += 100 * (current_difference - prev_difference)
+
     # --- 2. Unit Change Rewards/Penalties ---
     current_ally_units = {
         d["class"] for d in current_state.detections if not d.get("is_enemy")
@@ -513,22 +517,14 @@ def calculate_reward(
 
     # Reward for destroying enemy units
     destroyed_enemies = len(previous_enemy_units - current_enemy_units)
-    reward += destroyed_enemies * 2.0
+    reward += destroyed_enemies * 5.0
 
     # Penalty for losing ally units
     lost_allies = len(previous_ally_units - current_ally_units)
-    reward -= lost_allies * 2.0
-
-    # --- 3. Elixir Advantage Reward ---
-    elixir_advantage = current_state.elixir - previous_state.elixir
-    if elixir_advantage > 0:
-        reward += elixir_advantage * 0.1  # Small reward for gaining elixir
-
-    elixir_hold_cost = current_state.elixir * 0.1
-    reward -= elixir_hold_cost
+    reward -= lost_allies * 5.0
 
     # --- 4. Elixir Overflow Penalty ---
-    if current_state.elixir == 10:
+    if current_state.elixir >= 8:
         penalty = 50.0
         reward -= penalty
         print(f"Calculated reward: Elixir overflow penalty applied: {penalty}")

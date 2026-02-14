@@ -106,10 +106,12 @@ def display_results(results, image_path):
             class_id_int = int(class_id)  # Convert to integer
             class_name = class_names[class_id_int]  # Use integer index
 
-            print(f"Detection {i+1}:")
+            print(f"Detection {i + 1}:")
             print(f"  Class: {class_name} (ID: {class_id_int})")
             print(f"  Confidence: {confidence:.4f}")
-            print(f"  Bounding Box: [{bbox.x1:.1f}, {bbox.y1:.1f}, {bbox.x2:.1f}, {bbox.y2:.1f}]")
+            print(
+                f"  Bounding Box: [{bbox.x1:.1f}, {bbox.y1:.1f}, {bbox.x2:.1f}, {bbox.y2:.1f}]"
+            )
 
 
 def _get_devices():

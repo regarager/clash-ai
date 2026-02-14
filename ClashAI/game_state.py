@@ -1,6 +1,7 @@
 from typing import Any, Optional
 import torch
 
+
 class GameState:
     """
     Represents the complete, extracted state of the game from a single screenshot.
@@ -35,11 +36,16 @@ class GameState:
         if self.tower_healths:
             output += "Towers:\n"
             for tower, health in sorted(self.tower_healths.items()):
-                name = tower.replace("ally_", "").replace("enemy_", "").replace("_", " ").title()
+                name = (
+                    tower.replace("ally_", "")
+                    .replace("enemy_", "")
+                    .replace("_", " ")
+                    .title()
+                )
                 output += f"  - {name}: {health:.0%}\n"
         else:
             output += "Towers: Health data not available.\n"
-            
+
         output += f"Detections: {len(self.detections)} objects\n"
 
         return output

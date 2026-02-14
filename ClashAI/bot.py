@@ -1,6 +1,6 @@
 from time import time, sleep
 from adb_pywrapper.adb_device import AdbDevice
-from positions import BATTLE, CARDS, ALLY_CORNERS
+from .positions import BATTLE, CARDS, ALLY_CORNERS
 
 
 class Bot:
@@ -50,7 +50,7 @@ class Bot:
                 width = int(dimensions[0])
                 height = int(dimensions[1])
                 return width, height
-        print(f"Warning: Could not parse screen size from adb output: {output}. Defaulting to 1920x1080.")
+        print(
+            f"Warning: Could not parse screen size from adb output: {output}. Defaulting to 1920x1080."
+        )
         return 1920, 1080
-
-

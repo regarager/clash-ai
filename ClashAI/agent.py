@@ -1,5 +1,5 @@
+from time import sleep
 from typing import Any, Optional
-from time import sleep 
 
 import numpy as np
 import torch
@@ -7,9 +7,9 @@ import torch.nn as nn
 from torch.distributions import Categorical, Normal
 from typing_extensions import override
 
-from vision import get_full_game_state, calculate_reward
-from bot import Bot
-from game_state import GameState
+from .bot import Bot
+from .game_state import GameState
+from .vision import calculate_reward, get_full_game_state
 
 __all__ = ["ActorCritic"]
 
@@ -56,7 +56,9 @@ class ActorCritic(nn.Module):
         )
         self.card_embedding = nn.Embedding(num_card_types, card_embedding_size)
         card_feature_dim = card_embedding_size + card_continuous_feature_dim
-        nhead = 4 if card_feature_dim % 4 == 0 else (2 if card_feature_dim % 2 == 0 else 1)
+        nhead = (
+            4 if card_feature_dim % 4 == 0 else (2 if card_feature_dim % 2 == 0 else 1)
+        )
         self.attention = nn.MultiheadAttention(
             embed_dim=card_feature_dim, num_heads=nhead, batch_first=True
         )
@@ -101,30 +103,35 @@ class ActorCritic(nn.Module):
         print(f"Current Game State: {current_state}")
 
         if not current_state.detections:
-            print("AGENT DEBUG: Skipping step due to zero detections from vision module.")
-            return current_state # Skip the rest of the step
+            print(
+                "AGENT DEBUG: Skipping step due to zero detections from vision module."
+            )
+            return current_state  # Skip the rest of the step
 
         if previous_state is None:
             return current_state
-            
+
         # 2. Ask agent for action
         d_action, c_action = self.select_action(
             current_state.fixed_inputs,
             current_state.card_ids,
             current_state.card_continuous_features,
         )
-        print(f"Agent selected Discrete Action: {d_action}, Continuous Action: {c_action}")
+        print(
+            f"Agent selected Discrete Action: {d_action}, Continuous Action: {c_action}"
+        )
 
         # If no objects are detected, force "do nothing" action
         if current_state.card_ids.nelement() == 0 and d_action < 4:
-            print("AGENT INFO: No objects detected. Overriding action to 'do nothing' (action 4).")
-            d_action = 4 # Force "do nothing" action
-            
+            print("AGENT WARN: No objects detected.")
+
         # 3. Take action
         if d_action < 4:  # Assuming actions 0-3 are "play card"
             scaled_x = (c_action[0] + 1) / 2
             scaled_y = (c_action[1] + 1) / 2
-            print(f"Playing card {d_action} at scaled position ({scaled_x:.2f}, {scaled_y:.2f})")
+            print(
+                f"Playing card {d_action} at scaled position ({scaled_x:.2f}, {scaled_y:.2f})"
+            )
             self.bot.play_card(d_action, scaled_x, scaled_y)
         else:
             print("Agent chose to do nothing (action 4).")
@@ -156,13 +163,16 @@ class ActorCritic(nn.Module):
 
         if card_ids is not None and card_ids.nelement() > 0:
             card_embeds = self.card_embedding(card_ids)
-            if card_continuous_features is not None and card_continuous_features.nelement() > 0:
+            if (
+                card_continuous_features is not None
+                and card_continuous_features.nelement() > 0
+            ):
                 card_full_features = torch.cat(
                     [card_embeds, card_continuous_features], dim=-1
                 )
             else:
                 card_full_features = card_embeds
-            
+
             attn_output, _ = self.attention(
                 card_full_features, card_full_features, card_full_features
             )
@@ -222,17 +232,21 @@ class ActorCritic(nn.Module):
             return
 
         rewards = torch.tensor(self.rewards, dtype=torch.float32)
-        
+
         # If all rewards are the same (e.g., all zeros), stddev will be 0.
         # This can lead to NaNs in normalized returns and subsequent loss calculation.
         # Skip update if rewards are essentially constant, as there's no learning signal.
-        if len(rewards) < 2 or rewards.std() < 1e-6: # Check if std is too small or only one reward
-            print(f"AGENT WARNING: Skipping update due to constant or insufficient rewards. Stddev: {rewards.std().item()}")
+        if (
+            len(rewards) < 2 or rewards.std() < 1e-6
+        ):  # Check if std is too small or only one reward
+            print(
+                f"AGENT WARNING: Skipping update due to constant or insufficient rewards. Stddev: {rewards.std().item()}"
+            )
             self.rewards.clear()
             self.log_probs.clear()
             self.state_values.clear()
             return
-        
+
         log_probs = torch.stack(self.log_probs)
         state_values = torch.stack(self.state_values).squeeze()
 
@@ -242,14 +256,18 @@ class ActorCritic(nn.Module):
             discounted_reward = r + gamma * discounted_reward
             returns.insert(0, discounted_reward)
         returns_tensor = torch.tensor(returns)
-        
+
         # Normalize returns
         # Add a small epsilon to the std to prevent division by zero, even if std is already 1e-9
         returns_std = returns_tensor.std()
-        if returns_std == 0: # Ensure we don't divide by zero if all returns are identical
-            returns_tensor = returns_tensor - returns_tensor.mean() # Just center it
+        if (
+            returns_std == 0
+        ):  # Ensure we don't divide by zero if all returns are identical
+            returns_tensor = returns_tensor - returns_tensor.mean()  # Just center it
         else:
-            returns_tensor = (returns_tensor - returns_tensor.mean()) / (returns_std + 1e-9)
+            returns_tensor = (returns_tensor - returns_tensor.mean()) / (
+                returns_std + 1e-9
+            )
 
         advantage = returns_tensor - state_values.detach()
         actor_loss = -(log_probs * advantage).mean()
@@ -258,7 +276,9 @@ class ActorCritic(nn.Module):
 
         # Check for NaNs in loss before backpropagation
         if torch.isnan(loss):
-            print("AGENT WARNING: NaN detected in loss. Skipping backpropagation and resetting buffers.")
+            print(
+                "AGENT WARNING: NaN detected in loss. Skipping backpropagation and resetting buffers."
+            )
             self.rewards.clear()
             self.log_probs.clear()
             self.state_values.clear()
@@ -310,13 +330,21 @@ if __name__ == "__main__":
     class MockBot(Bot):
         def __init__(self):
             super().__init__(use_adb=False)
-        def screenshot(self) -> str: return "mock_screenshot.png"
-        def get_screen_size(self) -> tuple[int, int]: return (1080, 1920)
-        def play_card(self, card_index: int, x: float, y: float) -> None: pass
-        def click(self, x: int, y: int) -> None: pass
+
+        def screenshot(self) -> str:
+            return "mock_screenshot.png"
+
+        def get_screen_size(self) -> tuple[int, int]:
+            return (1080, 1920)
+
+        def play_card(self, card_index: int, x: float, y: float) -> None:
+            pass
+
+        def click(self, x: int, y: int) -> None:
+            pass
 
     mock_bot = MockBot()
-    
+
     model = ActorCritic(
         bot=mock_bot,
         fixed_input_dim=FIXED_INPUT_DIM,
