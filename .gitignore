@@ -12,3 +12,6 @@ wheels/
 clash-ai-8/
 screenshots/
 *.pth
+
+# Report Builds
+report/*.pdf
