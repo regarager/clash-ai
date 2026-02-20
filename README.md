@@ -13,4 +13,7 @@
 3. Download the latest version of `best.pt` from [Releases](https://github.com/regarager/clash-ai/releases) and save it to `vision/best.pt`.
 4. Run the program with `python main.py`.
 
-**Note: the emulator should be run with size 1432x1736** to ensure that positions work properly.
+**Note: the emulator should be run with size 1432x1736** to ensure that positions work properly. This can be set with the command
+```bash
+adb shell wm size 1432x1736
+```
