@@ -27,7 +27,7 @@
 // --- Title Section ---
 #align(center)[
   #block(text(weight: "bold", size: 1.4em)[
-    Hybrid Actor-Critic Reinforcement Learning for Autonomous Real-Time Strategy in Clash Royale
+    ARW: Actor-Critic Reinforcement Learning Agent for Real-Time Strategy in Clash Royale
   ])
   #v(0.5em)
   #grid(
@@ -46,7 +46,7 @@
 #v(1em)
 
 #abstract[
-  This project addresses the challenge of automating real-time strategy (RTS) play in mobile environments, specifically *Clash Royale*. The problem is non-trivial due to the high-dimensional visual state space, hidden information (opponent hand/elixir), and the necessity of complex predictions in high-level play. Our contribution is a modular orchestration loop that synchronizes Android Debug Bridge (ADB) captures with a local YOLOv11 detection model and a hybrid Actor-Critic (A2C) agent. We demonstrate that integrating Multi-head Attention to process game entities allows for emergent strategic behavior, such as elixir conservation, which outperforms naive heuristic baselines.
+  This paper introduces the Autonomous Royale Winner (ARW), a system designed to address the challenges of automating real-time strategy (RTS) play in mobile environments. Specifically targeting Clash Royale, the problem is non-trivial due to the high-dimensional visual state space, hidden information (opponent hand/elixir), and the necessity of complex predictions in high-level play. Our contribution is a modular orchestration loop that synchronizes Android Debug Bridge (ADB) captures with a local YOLOv11 detection model and a hybrid Actor-Critic (A2C) agent. We demonstrate that integrating Multi-head Attention to process game entities allows for emergent strategic behavior, such as elixir conservation, which outperforms naive heuristic baselines.
 ]
 
 #v(1em)
@@ -79,6 +79,8 @@ We chose the *Actor-Critic (A2C)* framework based on findings from *Vinyals et a
 Unlike *Deep Q-Networks (DQN) [5]*, which are limited to discrete actions, A2C allows us to sample from a Bivariate Normal distribution for placement. This is critical because while the Clash Royale playfield is indeed a discrete grid (when considering only troop placements), the size of the grid makes it difficult to model as a discrete space. Furthermore, using a continuous distribution for locations allows for the project to more easily expand when including spell cards in the future, whose placements are not confined by the same discrete grid that troop placements are.
 
 In regards to the Android emulation, we choose to use Waydroid as the emulator and ADB to communicate with the emulator. Waydroid was selected because of its Linux support as well as its high performance even when considering the emulation overhead. Furthermore, we select ADB because it enables input actions (ex: tapping the screen) as well as grabbing screen output. In addition, ADB is considered as the standard for automating actions on Android Devices *[6]*.
+
+To obtain object detections to use as input to the agent, we choose YOLOv11 because of its high performance, which is necessary for obtaining real-time data, as future versions intend to reduce the time difference between calls to YOLOv11. While other models may be more accurate, they also require more computational time, which could be a problem later on. Therefore, we accept the slight accuracy penalty in exchange for better performance. 
 
 = Experimentation Methodology
 The system operates via `main.py` and `ClashAI/core.py` in a closed loop.
@@ -128,6 +130,8 @@ If granted additional time, we would:
 1. *Hybrid Policy Gradient:* Currently, the agent considers the values of the discrete and continuous action spaces independently, i.e. the agent chooses the best card and the best location, which may not be optimal. Using this algorithm would allow for distinction between the optimal placements for different cards.
 2. *Increase Information:* The agent's abilities can be expanded once more information is included. For example, knowing the time remaining could be used to change the strategy based on the difference in tower health, e.g. playing more defensively or offensively as necessary.
 3. *YOLO Refinement:* Expand the training set to include more cards, as well as increasing accuracy on the current dataset.
+4. *Multiple Actors:* Distribute instances of the agent across several instances using an asynchronous advantage actor-critic (A3C) architecture, allowing for training on more diverse gameplay as well as increasing training speed.
+5. *More training:* The project currently has the foundations necessary to faciliate training, which will be done in the future to see if superior gameplay is achievable.
 
 = References
 
@@ -160,4 +164,3 @@ If granted additional time, we would:
   [Vaswani, A., et al. "Attention is All You Need." _NIPS_, 2017.],
 )
 #reference([8], [Ultralytics. "YOLOv11 Documentation." 2024.])
-
