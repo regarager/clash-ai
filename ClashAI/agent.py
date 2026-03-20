@@ -50,6 +50,7 @@ class ActorCritic(nn.Module):
         self.rewards = []
         self.log_probs = []
         self.state_values = []
+        self.steps_since_update = 0
 
         self.fixed_mlp = nn.Sequential(
             nn.Linear(fixed_input_dim, hidden_dim // 2), nn.ReLU()
@@ -145,10 +146,17 @@ class ActorCritic(nn.Module):
         self.rewards.append(reward)
         print(f"AGENT: Reward calculated: {reward}")
 
-        # 5. Update the agent
-        print("AGENT: Updating agent (training step)...")
-        self.update()
-        print("AGENT: Agent update complete.")
+        self.steps_since_update += 1
+
+        # 5. Update the agent periodically or on game end
+        # We update if we have enough steps or if a big reward (win/loss) is detected
+        if self.steps_since_update >= 10 or abs(reward) >= 500:
+            print(f"AGENT: Updating agent after {self.steps_since_update} steps...")
+            self.update()
+            self.steps_since_update = 0
+            print("AGENT: Agent update complete.")
+        else:
+            print(f"AGENT: Buffering reward ({self.steps_since_update}/10 steps to update).")
 
         return current_state
 
