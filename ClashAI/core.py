@@ -34,6 +34,12 @@ def run() -> None:
 
     print(f"Connected to ADB device: {bot.device}.")
 
+    # --- Verify Minicap Installation ---
+    if not bot.minicap.is_installed():
+        print("ERROR: Minicap is not installed or functional on the device.")
+        bot.check_minicap()  # Run diagnostic check for user help
+        exit(1)
+
     agent = ActorCritic(
         bot=bot,
         fixed_input_dim=FIXED_INPUT_DIM,

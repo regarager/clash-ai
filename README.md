@@ -17,3 +17,35 @@
 ```bash
 adb shell wm size 1432x1736
 ```
+
+## Faster Screenshots with Minicap
+
+By default, the bot uses `adb screencap`, which can be slow. To significantly improve screenshot speed, you can install `minicap`.
+
+### Installation Steps
+
+1.  **Identify your device ABI and SDK**:
+    Run the setup script:
+    ```bash
+    python setup/install_minicap.py
+    ```
+
+2.  **Download the correct binaries**:
+    Go to the [DeviceFarmer/minicap](https://github.com/DeviceFarmer/minicap) repository and download:
+    - `bin/<your-abi>/minicap`
+    - `shared/android-<your-sdk>/<your-abi>/minicap.so`
+
+3.  **Push the files to your device**:
+    ```bash
+    adb push bin/<your-abi>/minicap /data/local/tmp/
+    adb push shared/android-<your-sdk>/<your-abi>/minicap.so /data/local/tmp/
+    adb shell chmod 777 /data/local/tmp/minicap
+    ```
+
+4.  **Verify the installation**:
+    Run the setup script again:
+    ```bash
+    python setup/install_minicap.py
+    ```
+
+Once installed, the bot will automatically detect and use `minicap` for faster screen capture.

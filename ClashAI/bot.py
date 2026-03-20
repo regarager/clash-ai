@@ -1,12 +1,14 @@
 from time import time, sleep
 from adb_pywrapper.adb_device import AdbDevice
 from .positions import BATTLE, CARDS, ALLY_CORNERS
+from .minicap import Minicap
 
 
 class Bot:
     def __init__(self, device: str) -> None:
         self.device: str = device
         self.adb: AdbDevice = AdbDevice(device)
+        self.minicap: Minicap = Minicap(device)
 
     def is_offline(self):
         return AdbDevice.get_device_status(self.device) == "offline"
@@ -25,12 +27,19 @@ class Bot:
         sleep(0.5)
         self.tap(ALLY_CORNERS.pt(x, y))
 
+    def check_minicap(self):
+        """Runs the diagnostic check for minicap installation."""
+        self.minicap.check_installation()
+
     def screenshot(self) -> str:
-        filename = f"screenshots/{int(time())}.png"
-        print(f"Screenshotted to {filename}")
+        """
+        Takes a screenshot using minicap.
+        Raises RuntimeError if minicap is not functional.
+        """
         self.shell("settings put system pointer_location 0")
-        self.shell(f"screencap -p > {filename}")
+        filename = self.minicap.screenshot()
         self.shell("settings put system pointer_location 1")
+        print(f"Screenshotted to {filename}")
 
         return filename
 
