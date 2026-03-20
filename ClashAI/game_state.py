@@ -1,5 +1,16 @@
+from enum import Enum, auto
 from typing import Any, Optional
 import torch
+
+
+class GameScreen(Enum):
+    """
+    Enum representing the different screens or states the game can be in.
+    """
+    MAIN_PAGE = auto()
+    GAME_SCREEN = auto()  # Active battle
+    END_SCREEN = auto()    # Victory/Defeat screen
+    UNKNOWN = auto()
 
 
 class GameState:
@@ -17,6 +28,7 @@ class GameState:
         fixed_inputs: torch.Tensor,
         card_ids: torch.Tensor,
         card_continuous_features: torch.Tensor,
+        screen_type: GameScreen = GameScreen.UNKNOWN,
     ):
         self.elixir = elixir
         self.tower_healths = tower_healths
@@ -24,13 +36,14 @@ class GameState:
         self.fixed_inputs = fixed_inputs
         self.card_ids = card_ids
         self.card_continuous_features = card_continuous_features
+        self.screen_type = screen_type
 
     def __str__(self) -> str:
         """
         Returns a string representation of the game state for easy reading,
         including elixir, tower healths, and number of detections.
         """
-        output = "--- Game State ---\n"
+        output = f"--- Game State ({self.screen_type.name}) ---\n"
         output += f"Elixir: {self.elixir}\n"
 
         if self.tower_healths:

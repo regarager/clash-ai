@@ -1,3 +1,4 @@
+from enum import Enum, auto
 import os
 import time  # For timestamp in debug image filename
 from typing import Any, Optional
@@ -8,9 +9,10 @@ import torch
 
 from .bot import Bot
 from .cards import CARDS, TOWERS
-from .game_state import GameState
+from .game_state import GameScreen, GameState
 from .local_yolo_service import get_yolo_predictions
-from .positions import ELIXIR_BAR_BBOX, TOWER_BBOXES, BBox
+from .positions import ELIXIR_BAR_BBOX, END_SCREEN_BBOX, MAIN_PAGE_BBOX, TOWER_BBOXES, BBox
+
 
 # --- Model and State Configuration Constants (moved from main.py) ---
 FIXED_INPUT_DIM = 9  # Elixir, 6 Tower Healths, Ally Unit Count, Enemy Unit Count
@@ -220,40 +222,77 @@ def get_tower_healths(image_path: str) -> dict[str, float]:
     return tower_healths
 
 
-def is_game_active(image_path: str) -> bool:
+def get_game_screen(image_path: str) -> GameScreen:
     """
-    Checks if the game is active by looking for the elixir bar (either filled or empty).
+    Detects the current game screen from a screenshot.
     """
     image = cv2.imread(image_path)
     if image is None:
-        return False
+        return GameScreen.UNKNOWN
 
+    # 1. Check for Active Battle Screen (GAME_SCREEN)
+    # Primary indicator: presence of the elixir bar (purple or background color)
     x, y, w, h = ELIXIR_BAR_BBOX.to_xywh()
-    elixir_bar_image = image[y : y + h, x : x + w]
+    if 0 <= y < image.shape[0] and 0 <= x < image.shape[1]:
+        elixir_bar_image = image[y : y + h, x : x + w]
 
-    # Check for purple elixir (filled bar)
-    lower_purple = np.array([125, 50, 50])
-    upper_purple = np.array([155, 255, 255])
-    purple_fill_ratio = _get_bar_fill_percentage(
-        elixir_bar_image, [(lower_purple, upper_purple)]
-    )
-    if (
-        purple_fill_ratio is not None and purple_fill_ratio > 0.1
-    ):  # Threshold for purple presence
-        return True
+        # Purple color range (filled bar)
+        lower_purple = np.array([125, 50, 50])
+        upper_purple = np.array([155, 255, 255])
+        purple_fill = _get_bar_fill_percentage(
+            elixir_bar_image, [(lower_purple, upper_purple)]
+        )
 
-    # Check for empty elixir bar color
-    lower_empty_elixir = np.array([98, 196, 34])
-    upper_empty_elixir = np.array([118, 255, 134])
-    empty_fill_ratio = _get_bar_fill_percentage(
-        elixir_bar_image, [(lower_empty_elixir, upper_empty_elixir)]
-    )
-    if (
-        empty_fill_ratio is not None and empty_fill_ratio > 0.5
-    ):  # If more than 50% is empty color
-        return True
+        # Empty elixir bar color
+        lower_empty = np.array([98, 196, 34])
+        upper_empty = np.array([118, 255, 134])
+        empty_fill = _get_bar_fill_percentage(
+            elixir_bar_image, [(lower_empty, upper_empty)]
+        )
 
-    return False
+        if (purple_fill is not None and purple_fill > 0.05) or (
+            empty_fill is not None and empty_fill > 0.3
+        ):
+            return GameScreen.GAME_SCREEN
+
+    # 2. Check for End Screen (Victory/Defeat)
+    # Blue: #4983b2 -> RGB(73, 131, 178) -> HSV approx (104, 150, 178)
+    ex, ey, ew, eh = END_SCREEN_BBOX.to_xywh()
+    if 0 <= ey < image.shape[0] and 0 <= ex < image.shape[1]:
+        end_screen_region = image[ey : ey + eh, ex : ex + ew]
+
+        lower_blue = np.array([95, 100, 130])
+        upper_blue = np.array([115, 255, 220])
+        blue_fill = _get_bar_fill_percentage(
+            end_screen_region, [(lower_blue, upper_blue)]
+        )
+
+        if blue_fill is not None and blue_fill >= 0.75:
+            return GameScreen.END_SCREEN
+    
+    # 3. Check for Main Page
+    # Yellow: #ffbb00 -> RGB(255, 187, 0) -> HSV approx (22, 255, 255)
+    mx, my, mw, mh = MAIN_PAGE_BBOX.to_xywh()
+    if 0 <= my < image.shape[0] and 0 <= mx < image.shape[1]:
+        main_page_region = image[my : my + mh, mx : mx + mw]
+
+        lower_yellow = np.array([15, 150, 150])
+        upper_yellow = np.array([30, 255, 255])
+        yellow_fill = _get_bar_fill_percentage(
+            main_page_region, [(lower_yellow, upper_yellow)]
+        )
+
+        if yellow_fill is not None and yellow_fill >= 0.75:
+            return GameScreen.MAIN_PAGE
+
+    return GameScreen.UNKNOWN
+
+
+def is_game_active(image_path: str) -> bool:
+    """
+    Checks if the game is in the active battle screen.
+    """
+    return get_game_screen(image_path) == GameScreen.GAME_SCREEN
 
 
 def get_object_detections(
@@ -354,7 +393,12 @@ def get_full_game_state(
             fixed_inputs=torch.zeros(FIXED_INPUT_DIM),
             card_ids=torch.empty(0, dtype=torch.long),
             card_continuous_features=torch.empty(0),
+            screen_type=GameScreen.UNKNOWN,
         )
+
+    # 0. Detect Screen Type
+    screen_type = get_game_screen(screenshot_path)
+    print(f"VISION: Detected Screen: {screen_type.name}")
 
     # 1. Get Elixir, Tower Healths, and Object Detections
     print("VISION: Getting elixir...")
@@ -369,6 +413,11 @@ def get_full_game_state(
     print("VISION: Getting object detections (YOLO local inference)...")
     detections = get_object_detections(screenshot_path, (screen_width, screen_height))
     print(f"VISION: Got {len(detections)} object detections.")
+
+    # Reclassify GAME_SCREEN as UNKNOWN if no objects are detected
+    if screen_type == GameScreen.GAME_SCREEN and not detections:
+        print("VISION: GAME_SCREEN detected but zero objects found. Reclassifying as UNKNOWN.")
+        screen_type = GameScreen.UNKNOWN
 
     print(f"VISION: Deleting screenshot: {screenshot_path}")
     os.remove(screenshot_path)  # Clean up screenshot
@@ -462,6 +511,7 @@ def get_full_game_state(
         fixed_inputs=fixed_inputs,
         card_ids=card_ids,
         card_continuous_features=card_continuous_features,
+        screen_type=screen_type,
     )
 
 

@@ -8,10 +8,13 @@ from torch.distributions import Categorical, Normal
 from typing_extensions import override
 
 from .bot import Bot
-from .game_state import GameState
+from .game_state import GameScreen, GameState
 from .vision import calculate_reward, get_full_game_state
 
+
 __all__ = ["ActorCritic"]
+
+
 
 
 class ActorCritic(nn.Module):
@@ -103,6 +106,26 @@ class ActorCritic(nn.Module):
         current_state = get_full_game_state(self.bot)
         print(f"Current Game State: {current_state}")
 
+        # --- Handle UI Screens (Non-Battle) ---
+        if current_state.screen_type == GameScreen.END_SCREEN:
+            print("BOT: End screen detected. Clicking return to main menu.")
+            self.bot.tap((800, 1540))
+            sleep(2)
+            return current_state
+
+        if current_state.screen_type == GameScreen.MAIN_PAGE:
+            print("BOT: Main page detected. Clicking Battle.")
+            from .positions import BATTLE
+            self.bot.tap(BATTLE)
+            sleep(2)
+            return current_state
+
+        # --- Handle Active Battle Screen (Agent Actions) ---
+        if current_state.screen_type != GameScreen.GAME_SCREEN:
+            print(f"BOT: Non-game screen ({current_state.screen_type.name}) - Clicking (700, 800) to skip.")
+            self.bot.tap((700, 800))
+            return current_state
+
         if not current_state.detections:
             print(
                 "AGENT DEBUG: Skipping step due to zero detections from vision module."
@@ -121,10 +144,6 @@ class ActorCritic(nn.Module):
         print(
             f"Agent selected Discrete Action: {d_action}, Continuous Action: {c_action}"
         )
-
-        # If no objects are detected, force "do nothing" action
-        if current_state.card_ids.nelement() == 0 and d_action < 4:
-            print("AGENT WARN: No objects detected.")
 
         # 3. Take action
         if d_action < 4:  # Assuming actions 0-3 are "play card"
