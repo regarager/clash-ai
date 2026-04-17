@@ -170,6 +170,30 @@ def debug_color_range(image_path: str, bbox: BBox, tower_name: str):
     print(f"\nBGR Mean: B={bgr_mean[0]:.1f}, G={bgr_mean[1]:.1f}, R={bgr_mean[2]:.1f}")
 
 
+def _debug_save_hand_crops(image_path: str, card_slots: list[tuple[int, int]], crop_w: int, crop_h: int):
+    """
+    Visualizes the card slots on the screenshot to verify positioning.
+    """
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
+            return
+
+        for i, (x_center, y_center) in enumerate(card_slots):
+            x1 = x_center - crop_w // 2
+            y1 = y_center - crop_h // 2
+            x2 = x_center + crop_w // 2
+            y2 = y_center + crop_h // 2
+            cv2.rectangle(img, (x1, y1), (x2, y2), (255, 255, 0), 3)
+            cv2.putText(img, f"Slot {i}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+
+        debug_path = os.path.join(os.path.dirname(image_path), f"debug_hand_slots_{int(time.time())}.png")
+        cv2.imwrite(debug_path, img)
+        print(f"DEBUG: Saved hand slot visualization to {debug_path}")
+    except Exception as e:
+        print(f"DEBUG ERROR: Failed to save hand slot visualization: {e}")
+
+
 def get_tower_healths(image_path: str) -> dict[str, float]:
     """
     Calculates the health of each tower from a screenshot of the game.
@@ -426,6 +450,9 @@ def get_full_game_state(
     image = cv2.imread(screenshot_path)
     hand_info = _hand_reader.identify_hand(image)
     print(f"VISION: Hand cards identified: {[h['name'] for h in hand_info]}")
+
+    # Debug: Verify positions
+    _debug_save_hand_crops(screenshot_path, _hand_reader.card_slots, _hand_reader.crop_w, _hand_reader.crop_h)
 
     # Optional: Save crops periodically to build training data
     if int(time.time()) % 60 < 2: # Every ~60s, save a sample
