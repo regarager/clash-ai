@@ -8,7 +8,7 @@ from .positions import CARDS
 class HandReader:
     """
     Identifies the 4 cards currently in the bot's hand.
-    Optimized for large card libraries using Perceptual Hashing and Active Deck filtering.
+    Optimized for large card libraries using 16x16 Perceptual Hashing (256 bits).
     """
 
     def __init__(self, template_dir: str = "setup/card_templates"):
@@ -18,41 +18,33 @@ class HandReader:
         self.crop_h = 140
         
         # State for optimization
-        self.template_hashes: Dict[str, int] = {}
+        self.template_hashes: Dict[str, np.ndarray] = {}
         self.active_deck: Set[str] = set()
         self.max_deck_size = 8
         
         self.templates = self._load_templates()
 
-    def _get_image_hash(self, img: np.ndarray) -> int:
+    def _get_image_hash(self, img: np.ndarray) -> np.ndarray:
         """
-        Generates a 64-bit Perceptual Hash (Average Hash).
-        Resizes to 8x8, grayscales, and computes bits based on mean brightness.
+        Generates a 256-bit Perceptual Hash (16x16).
+        Returns a boolean numpy array for fast comparison.
         """
-        # 1. Resize to 8x8 (removes high-frequency detail)
-        resized = cv2.resize(img, (8, 8), interpolation=cv2.INTER_AREA)
+        # 1. Resize to 16x16
+        resized = cv2.resize(img, (16, 16), interpolation=cv2.INTER_AREA)
         
-        # 2. Grayscale (removes color variance)
+        # 2. Grayscale
         if len(resized.shape) == 3:
             gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
         else:
             gray = resized
             
-        # 3. Compute Mean
+        # 3. Compute Mean and build hash
         avg = gray.mean()
-        
-        # 4. Build 64-bit hash (1 if pixel > mean, else 0)
-        # We use a bitstring converted to an integer
-        diff = gray > avg
-        hash_val = 0
-        for i, v in enumerate(diff.flatten()):
-            if v:
-                hash_val |= (1 << i)
-        return hash_val
+        return gray > avg
 
-    def _hamming_distance(self, h1: int, h2: int) -> int:
-        """Calculates how many bits differ between two hashes."""
-        return bin(h1 ^ h2).count('1')
+    def _hamming_distance(self, h1: np.ndarray, h2: np.ndarray) -> int:
+        """Calculates bit difference between two 16x16 hashes."""
+        return np.count_nonzero(h1 != h2)
 
     def _load_templates(self) -> Dict[str, np.ndarray]:
         """Loads reference card images and pre-computes their hashes."""
@@ -68,10 +60,9 @@ class HandReader:
                 if img is not None:
                     card_name = os.path.splitext(filename)[0]
                     templates[card_name] = img
-                    # Pre-compute hash for fast matching later
                     self.template_hashes[card_name] = self._get_image_hash(img)
         
-        print(f"HAND_READER: Indexed {len(self.template_hashes)} card hashes.")
+        print(f"HAND_READER: Indexed {len(self.template_hashes)} card hashes (16x16).")
         return templates
 
     def reset_active_deck(self):
@@ -79,41 +70,39 @@ class HandReader:
         self.active_deck.clear()
 
     def _match_card(self, crop: np.ndarray) -> str:
-        """Identifies the card using fast hashing and active deck priority."""
+        """Identifies the card using 16x16 hashing."""
         if not self.template_hashes:
             return "unknown"
 
         crop_hash = self._get_image_hash(crop)
         best_match = "unknown"
-        min_dist = 64 # Max distance for 64-bit hash
+        min_dist = 256 # Max distance for 16x16 hash
         
-        # 1. Priority Search: Check cards already seen in this deck
+        # 1. Priority Search: Active Deck
         for name in self.active_deck:
             dist = self._hamming_distance(crop_hash, self.template_hashes[name])
             if dist < min_dist:
                 min_dist = dist
                 best_match = name
 
-        # If we found a very strong match in the active deck, return early (Optimization)
-        if min_dist <= 5: 
+        # 10 bits out of 256 is ~96% similarity
+        if min_dist <= 10: 
             return best_match
 
-        # 2. Global Search: Only if we haven't found a perfect match in the active deck
-        # and we haven't filled the deck yet.
+        # 2. Global Search
         if len(self.active_deck) < self.max_deck_size:
             for name, h_val in self.template_hashes.items():
-                if name in self.active_deck: continue # Already checked
+                if name in self.active_deck: continue
                 
                 dist = self._hamming_distance(crop_hash, h_val)
                 if dist < min_dist:
                     min_dist = dist
                     best_match = name
 
-        # Threshold: 12 bits out of 64 is ~80% similarity
-        if min_dist > 12:
+        # Threshold: 50 bits out of 256 is ~80% similarity
+        if min_dist > 50:
             return "unknown"
             
-        # Add to active deck if identified
         if best_match != "unknown":
             self.active_deck.add(best_match)
             
