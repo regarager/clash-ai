@@ -12,6 +12,15 @@ from .cards import CARDS, TOWERS
 from .game_state import GameScreen, GameState
 from .local_yolo_service import get_yolo_predictions
 from .positions import ELIXIR_BAR_BBOX, END_SCREEN_BBOX, MAIN_PAGE_BBOX, TOWER_BBOXES, BBox
+from .hand_reader import HandReader
+
+# Global instance of HandReader
+_hand_reader = HandReader()
+
+
+def reset_hand_reader():
+    """Resets the active deck in HandReader. Call this at the start of a match."""
+    _hand_reader.reset_active_deck()
 
 
 # --- Model and State Configuration Constants (moved from main.py) ---
@@ -409,10 +418,18 @@ def get_full_game_state(
     tower_healths = get_tower_healths(screenshot_path)
     print(f"VISION: Tower Healths: {tower_healths}")
 
-    screen_width, screen_height = bot.get_screen_size()
     print("VISION: Getting object detections (YOLO local inference)...")
     detections = get_object_detections(screenshot_path, (screen_width, screen_height))
     print(f"VISION: Got {len(detections)} object detections.")
+
+    # 1.5 Get Hand Cards (Precise Identification)
+    image = cv2.imread(screenshot_path)
+    hand_info = _hand_reader.identify_hand(image)
+    print(f"VISION: Hand cards identified: {[h['name'] for h in hand_info]}")
+
+    # Optional: Save crops periodically to build training data
+    if int(time.time()) % 60 < 2: # Every ~60s, save a sample
+        _hand_reader.save_hand_crops(image)
 
     # Reclassify GAME_SCREEN as UNKNOWN if no objects are detected
     if screen_type == GameScreen.GAME_SCREEN and not detections:
@@ -468,34 +485,36 @@ def get_full_game_state(
         dtype=torch.float32,
     )
 
-    # 3. Preprocess detections into tensors
-    card_ids_list, card_continuous_features_list = [], []
-    if detections:
-        for detection in detections:
-            base_name = detection.get("base_name", "")
-            try:
-                if base_name in class_names:
-                    card_id = class_names.index(base_name)
-                    card_ids_list.append(card_id)
+    # 3. Preprocess Hand Cards into card_ids (Fixed size: 4)
+    card_ids_list = []
+    for h in hand_info:
+        name = h["name"]
+        try:
+            # We use the same class_names from the global model configuration
+            card_id = class_names.index(name) if name in class_names else 0 # 0 as fallback
+            card_ids_list.append(card_id)
+        except (ValueError, IndexError):
+            card_ids_list.append(0)
 
-                    x_center = detection["x"] / screen_width
-                    y_center = detection["y"] / screen_height
-                    width = detection["width"] / screen_width
-                    height = detection["height"] / screen_height
-                    card_continuous_features_list.append(
-                        [x_center, y_center, width, height]
-                    )
-            except (ValueError, IndexError):
-                print(
-                    f"Warning: Detected class base name '{base_name}' not in CLASS_NAMES. Skipping."
-                )
-                continue
+    card_ids = torch.tensor(card_ids_list, dtype=torch.long)
 
-    card_ids = (
-        torch.tensor(card_ids_list, dtype=torch.long)
-        if card_ids_list
-        else torch.empty(0, dtype=torch.long)
-    )
+    # 4. Preprocess YOLO Detections into continuous features
+    # Note: We filter out detections that are likely hand cards to focus on field state
+    field_detections = [
+        d for d in detections 
+        if d["y"] < 1400 # Heuristic: anything above the hand area is a field unit
+    ]
+    
+    card_continuous_features_list = []
+    for detection in field_detections:
+        x_center = detection["x"] / screen_width
+        y_center = detection["y"] / screen_height
+        width = detection["width"] / screen_width
+        height = detection["height"] / screen_height
+        card_continuous_features_list.append(
+            [x_center, y_center, width, height]
+        )
+
     card_continuous_features = (
         torch.tensor(card_continuous_features_list, dtype=torch.float32)
         if card_continuous_features_list

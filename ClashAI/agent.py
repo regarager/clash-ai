@@ -9,7 +9,7 @@ from typing_extensions import override
 
 from .bot import Bot
 from .game_state import GameScreen, GameState
-from .vision import calculate_reward, get_full_game_state
+from .vision import calculate_reward, get_full_game_state, reset_hand_reader
 
 
 __all__ = ["ActorCritic"]
@@ -54,6 +54,7 @@ class ActorCritic(nn.Module):
         self.log_probs = []
         self.state_values = []
         self.steps_since_update = 0
+        self.num_card_slots = num_discrete_actions - 1
 
         self.fixed_mlp = nn.Sequential(
             nn.Linear(fixed_input_dim, hidden_dim // 2), nn.ReLU()
@@ -80,10 +81,10 @@ class ActorCritic(nn.Module):
         self.continuous_action_head = nn.Sequential(
             nn.Linear(combined_feature_dim, hidden_dim),
             nn.ReLU(),
-            nn.Linear(hidden_dim, continuous_action_dim),
+            nn.Linear(hidden_dim, self.num_card_slots * continuous_action_dim),
         )
         self.continuous_action_log_std = nn.Parameter(
-            torch.zeros(continuous_action_dim)
+            torch.zeros(self.num_card_slots, continuous_action_dim)
         )
         self.critic_head = nn.Sequential(
             nn.Linear(combined_feature_dim, hidden_dim),
@@ -100,7 +101,7 @@ class ActorCritic(nn.Module):
         Performs one step of the game loop: gets state, selects action,
         calculates reward, and updates the agent.
         """
-        print("\\n--- Agent Step Initiated ---")
+        print("\n--- Agent Step Initiated ---")
 
         # 1. Get current game state
         current_state = get_full_game_state(self.bot)
@@ -114,7 +115,8 @@ class ActorCritic(nn.Module):
             return current_state
 
         if current_state.screen_type == GameScreen.MAIN_PAGE:
-            print("BOT: Main page detected. Clicking Battle.")
+            print("BOT: Main page detected. Clicking Battle and resetting HandReader.")
+            reset_hand_reader()
             from .positions import BATTLE
             self.bot.tap(BATTLE)
             sleep(2)
@@ -146,7 +148,7 @@ class ActorCritic(nn.Module):
         )
 
         # 3. Take action
-        if d_action < 4:  # Assuming actions 0-3 are "play card"
+        if d_action < self.num_card_slots:  # Assuming actions 0-3 are "play card"
             scaled_x = (c_action[0] + 1) / 2
             scaled_y = (c_action[1] + 1) / 2
             print(
@@ -154,7 +156,7 @@ class ActorCritic(nn.Module):
             )
             self.bot.play_card(d_action, scaled_x, scaled_y)
         else:
-            print("Agent chose to do nothing (action 4).")
+            print(f"Agent chose to do nothing (action {d_action}).")
 
         sleep(1)  # Wait for the game to update after an action
         print("AGENT: Finished waiting.")
@@ -188,20 +190,24 @@ class ActorCritic(nn.Module):
     ) -> tuple[Categorical, Normal, torch.Tensor]:
         fixed_features = self.fixed_mlp(fixed_inputs)
 
+        # 1. Process Hand Card Embeddings (card_ids should be size 4)
         if card_ids is not None and card_ids.nelement() > 0:
-            card_embeds = self.card_embedding(card_ids)
+            hand_embeds = self.card_embedding(card_ids) # [batch, 4, embed_dim]
+            
+            # 2. Process Field Unit Features (card_continuous_features can vary)
+            # Currently we aggregate them using the same attention mechanism
             if (
                 card_continuous_features is not None
                 and card_continuous_features.nelement() > 0
             ):
-                card_full_features = torch.cat(
-                    [card_embeds, card_continuous_features], dim=-1
-                )
-            else:
-                card_full_features = card_embeds
+                # Simple implementation: we focus on hand for now as it's the action space
+                # But we can aggregate field features into a single context vector
+                field_features = card_continuous_features # [batch, num_units, 4]
+                # In a more advanced model, we'd use a separate Transformer for units
+                pass
 
             attn_output, _ = self.attention(
-                card_full_features, card_full_features, card_full_features
+                hand_embeds, hand_embeds, hand_embeds
             )
             card_features_agg = attn_output.mean(dim=1)
             card_features = self.cards_mlp(card_features_agg)
@@ -213,8 +219,12 @@ class ActorCritic(nn.Module):
         discrete_logits = self.discrete_action_head(combined_features)
         discrete_dist = Categorical(logits=discrete_logits)
 
-        continuous_mean = torch.tanh(self.continuous_action_head(combined_features))
-        action_std = self.continuous_action_log_std.exp().expand_as(continuous_mean)
+        # Parameterized continuous action: mean for each card slot
+        continuous_params = self.continuous_action_head(combined_features)
+        continuous_mean = torch.tanh(continuous_params.view(-1, self.num_card_slots, 2))
+        
+        # Action variance (shared across batch, but separate for each card slot)
+        action_std = self.continuous_action_log_std.exp().unsqueeze(0).expand_as(continuous_mean)
         continuous_dist = Normal(continuous_mean, action_std)
 
         state_value = self.critic_head(combined_features)
@@ -242,17 +252,29 @@ class ActorCritic(nn.Module):
         )
 
         discrete_action = discrete_dist.sample()
-        continuous_action = continuous_dist.sample()
-
+        discrete_idx = int(discrete_action.item())
+        
         discrete_log_prob = discrete_dist.log_prob(discrete_action)
-        continuous_log_prob = continuous_dist.log_prob(continuous_action).sum(dim=-1)
+
+        if discrete_idx < self.num_card_slots:
+            # Sample position for the selected card from its specific distribution
+            card_mean = continuous_dist.loc[:, discrete_idx, :]
+            card_std = continuous_dist.scale[:, discrete_idx, :]
+            card_dist = Normal(card_mean, card_std)
+            
+            continuous_action_sampled = card_dist.sample()
+            continuous_log_prob = card_dist.log_prob(continuous_action_sampled).sum(dim=-1)
+            
+            continuous_action_np = continuous_action_sampled.squeeze(0).detach().cpu().numpy()
+        else:
+            # "Do nothing" action has no associated continuous parameter log-prob
+            continuous_log_prob = torch.tensor([0.0], device=discrete_action.device)
+            continuous_action_np = np.zeros(2)
+
         self.log_probs.append(discrete_log_prob + continuous_log_prob)
         self.state_values.append(state_value)
 
-        return (
-            int(discrete_action.item()),
-            continuous_action.squeeze(0).detach().cpu().numpy(),
-        )
+        return discrete_idx, continuous_action_np
 
     def update(self, gamma: float = 0.99) -> None:
         if not self.rewards:
