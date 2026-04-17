@@ -60,15 +60,17 @@ class ActorCritic(nn.Module):
             nn.Linear(fixed_input_dim, hidden_dim // 2), nn.ReLU()
         )
         self.card_embedding = nn.Embedding(num_card_types, card_embedding_size)
-        card_feature_dim = card_embedding_size + card_continuous_feature_dim
+        
+        # The attention mechanism now operates only on the card embeddings (size 16)
+        attn_dim = card_embedding_size 
         nhead = (
-            4 if card_feature_dim % 4 == 0 else (2 if card_feature_dim % 2 == 0 else 1)
+            4 if attn_dim % 4 == 0 else (2 if attn_dim % 2 == 0 else 1)
         )
         self.attention = nn.MultiheadAttention(
-            embed_dim=card_feature_dim, num_heads=nhead, batch_first=True
+            embed_dim=attn_dim, num_heads=nhead, batch_first=True
         )
         self.cards_mlp = nn.Sequential(
-            nn.Linear(card_feature_dim, hidden_dim // 2), nn.ReLU()
+            nn.Linear(attn_dim, hidden_dim // 2), nn.ReLU()
         )
 
         combined_feature_dim = hidden_dim
