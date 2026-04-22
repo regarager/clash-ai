@@ -59,7 +59,7 @@ class ActorCritic(nn.Module):
         self.fixed_mlp = nn.Sequential(
             nn.Linear(fixed_input_dim, hidden_dim // 2), nn.ReLU()
         )
-        self.card_embedding = nn.Embedding(num_card_types, card_embedding_size)
+        self.card_embedding = nn.Embedding(num_card_types + 1, card_embedding_size)
         
         # The attention mechanism now operates only on the card embeddings (size 16)
         attn_dim = card_embedding_size 
@@ -144,6 +144,7 @@ class ActorCritic(nn.Module):
             current_state.fixed_inputs,
             current_state.card_ids,
             current_state.card_continuous_features,
+            current_state.playable_mask,
         )
         print(
             f"Agent selected Discrete Action: {d_action}, Continuous Action: {c_action}"
@@ -189,6 +190,7 @@ class ActorCritic(nn.Module):
         fixed_inputs: torch.Tensor,
         card_ids: torch.Tensor | None,
         card_continuous_features: torch.Tensor | None,
+        action_mask: torch.Tensor | None = None,
     ) -> tuple[Categorical, Normal, torch.Tensor]:
         fixed_features = self.fixed_mlp(fixed_inputs)
 
@@ -197,15 +199,11 @@ class ActorCritic(nn.Module):
             hand_embeds = self.card_embedding(card_ids) # [batch, 4, embed_dim]
             
             # 2. Process Field Unit Features (card_continuous_features can vary)
-            # Currently we aggregate them using the same attention mechanism
             if (
                 card_continuous_features is not None
                 and card_continuous_features.nelement() > 0
             ):
-                # Simple implementation: we focus on hand for now as it's the action space
-                # But we can aggregate field features into a single context vector
                 field_features = card_continuous_features # [batch, num_units, 4]
-                # In a more advanced model, we'd use a separate Transformer for units
                 pass
 
             attn_output, _ = self.attention(
@@ -219,6 +217,20 @@ class ActorCritic(nn.Module):
         combined_features = torch.cat([fixed_features, card_features], dim=1)
 
         discrete_logits = self.discrete_action_head(combined_features)
+        
+        # Apply action mask if provided
+        if action_mask is not None:
+            # action_mask is [batch, 4] where True means playable.
+            # We need to map it to [batch, 5] (4 cards + 1 "do nothing")
+            # "Do nothing" (last index) is always allowed.
+            batch_size = discrete_logits.shape[0]
+            extended_mask = torch.cat(
+                [action_mask, torch.ones((batch_size, 1), device=action_mask.device, dtype=torch.bool)],
+                dim=1
+            )
+            # Apply large negative value to unplayable actions
+            discrete_logits[~extended_mask] = -1e10
+
         discrete_dist = Categorical(logits=discrete_logits)
 
         # Parameterized continuous action: mean for each card slot
@@ -237,6 +249,7 @@ class ActorCritic(nn.Module):
         fixed_inputs: torch.Tensor,
         card_ids: torch.Tensor | None,
         card_continuous_features: torch.Tensor | None,
+        playable_mask: torch.Tensor | None = None,
     ) -> tuple[int, np.ndarray[Any, Any]]:
         if fixed_inputs.dim() == 1:
             fixed_inputs = fixed_inputs.unsqueeze(0)
@@ -248,9 +261,11 @@ class ActorCritic(nn.Module):
                 and card_continuous_features.dim() == 2
             ):
                 card_continuous_features = card_continuous_features.unsqueeze(0)
+        if playable_mask is not None and playable_mask.dim() == 1:
+            playable_mask = playable_mask.unsqueeze(0)
 
         discrete_dist, continuous_dist, state_value = self.forward(
-            fixed_inputs, card_ids, card_continuous_features
+            fixed_inputs, card_ids, card_continuous_features, playable_mask
         )
 
         discrete_action = discrete_dist.sample()
@@ -361,9 +376,10 @@ class ActorCritic(nn.Module):
         fixed_inputs: torch.Tensor,
         card_ids: torch.Tensor | None,
         card_continuous_features: torch.Tensor | None,
+        playable_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         _, _, state_value = self.forward(
-            fixed_inputs, card_ids, card_continuous_features
+            fixed_inputs, card_ids, card_continuous_features, playable_mask
         )
         return state_value
 
