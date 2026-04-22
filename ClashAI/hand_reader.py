@@ -80,46 +80,37 @@ class HandReader:
         if not self.template_hashes:
             return "unknown"
 
+        # 1. Reject solid or very low-contrast crops (empty slots)
+        gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        std_dev = np.std(gray_crop)
+        if std_dev < 10: # Heuristic for "too flat" to be a card
+            return "unknown"
+
         crop_hash = self._get_image_hash(crop)
         best_match = "unknown"
         min_dist = 256 
         
-        # 1. Priority Search: Active Deck
-        for name in self.active_deck:
-            dist = self._hamming_distance(crop_hash, self.template_hashes[name])
-            if dist < min_dist:
-                min_dist = dist
-                best_match = name
-
-        # 20 bits out of 256 is ~92% similarity (Strict Priority threshold)
-        if min_dist <= 20: 
-            return best_match
-
         # 2. Global Search
         for name, h_val in self.template_hashes.items():
-            if name in self.active_deck: continue
-            
             dist = self._hamming_distance(crop_hash, h_val)
             if dist < min_dist:
                 min_dist = dist
                 best_match = name
 
-        # Precision threshold: 65 bits out of 256 is ~75% similarity
-        if min_dist > 65:
-            print(f"HAND_READER: No match. Best: {best_match} (dist: {min_dist})")
+        # Strict Precision threshold: 45 bits out of 256 is ~82% similarity
+        # This prevents "hallucinating" cards that aren't in the template folder.
+        if min_dist > 45:
+            if min_dist < 100: # Only log if it was remotely close
+                print(f"HAND_READER: No confident match. Best: {best_match} (dist: {min_dist})")
             return "unknown"
             
-        if best_match != "unknown":
-            print(f"HAND_READER: Matched {best_match} (dist: {min_dist})")
-            self.active_deck.add(best_match)
-            
+        print(f"HAND_READER: Confirmed match: {best_match} (dist: {min_dist})")
         return best_match
 
     def _check_playability(self, crop: np.ndarray) -> bool:
         """Determines if a card is playable based on saturation."""
         hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
         avg_saturation = np.mean(hsv[:, :, 1])
-        # print(f"DEBUG: Card saturation: {avg_saturation:.1f}")
         return avg_saturation > 30 
 
     def _get_crop(self, image: np.ndarray, pos: Tuple[int, int]) -> np.ndarray:
@@ -135,12 +126,12 @@ class HandReader:
         hand = []
         for i, pos in enumerate(self.card_slots):
             crop = self._get_crop(image, pos)
-            playable = self._check_playability(crop)
             
-            if playable:
-                card_name = self._match_card(crop)
-            else:
-                card_name = "unknown"
+            # Always identify the card, even if unplayable
+            card_name = self._match_card(crop)
+            
+            # Check playability for the agent's action mask
+            playable = self._check_playability(crop)
             
             hand.append({
                 "slot": i,

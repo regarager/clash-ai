@@ -63,7 +63,12 @@ class GameState:
 
         # Hand Cards (decoded from card_ids)
         from .vision import CLASS_NAMES
-        hand_names = [CLASS_NAMES[cid] if (cid >= 0 and cid < len(CLASS_NAMES)) else "unknown" for cid in self.card_ids.tolist()]
+        hand_names = []
+        for cid in self.card_ids.tolist():
+            if cid > 0 and cid <= len(CLASS_NAMES):
+                hand_names.append(CLASS_NAMES[cid - 1])
+            else:
+                hand_names.append("unknown")
         output += f"Hand: {', '.join(hand_names)}\n"
 
         output += f"Detections: {len(self.detections)} objects\n"
