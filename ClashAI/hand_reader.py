@@ -5,10 +5,23 @@ import time
 from typing import List, Dict, Tuple, Set
 from .positions import CARDS
 
+# Hardcoded whitelist of cards we have templates for.
+# This prevents the bot from ever identifying a card not in our library.
+ALLOWED_TEMPLATES = {
+    "battle-ram",
+    "bomber",
+    "giant",
+    "knight",
+    "mini-pekka",
+    "minions",
+    "musketeer",
+    "valkyrie",
+}
+
 class HandReader:
     """
     Identifies the 4 cards currently in the bot's hand.
-    Optimized for large card libraries using 16x16 Perceptual Hashing (256 bits).
+    Uses center-weighted dHash for robust recognition.
     """
 
     def __init__(self, template_dir: str = "setup/card_templates"):
@@ -20,7 +33,6 @@ class HandReader:
         # State for optimization
         self.template_hashes: Dict[str, np.ndarray] = {}
         self.active_deck: Set[str] = set()
-        self.max_deck_size = 8
         
         self.templates = self._load_templates()
 
@@ -29,6 +41,9 @@ class HandReader:
         Generates a 256-bit Difference Hash (dHash) from the center of the image.
         Focuses on the character art and ignores noisy edges and backgrounds.
         """
+        if img is None or img.size == 0:
+            return np.zeros(256, dtype=bool)
+
         # 1. Center Crop (focus on the central 60% of the card)
         h, w = img.shape[:2]
         ch, cw = int(h * 0.6), int(w * 0.6)
@@ -61,10 +76,15 @@ class HandReader:
 
         for filename in os.listdir(self.template_dir):
             if filename.lower().endswith((".png", ".jpg", ".jpeg")):
+                card_name = os.path.splitext(filename)[0]
+                
+                # Only load if it's in our allowed whitelist
+                if card_name not in ALLOWED_TEMPLATES:
+                    continue
+
                 path = os.path.join(self.template_dir, filename)
                 img = cv2.imread(path)
                 if img is not None:
-                    card_name = os.path.splitext(filename)[0]
                     templates[card_name] = img
                     self.template_hashes[card_name] = self._get_image_hash(img)
         
@@ -83,28 +103,25 @@ class HandReader:
         # 1. Reject solid or very low-contrast crops (empty slots)
         gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
         std_dev = np.std(gray_crop)
-        if std_dev < 10: # Heuristic for "too flat" to be a card
+        if std_dev < 10: 
             return "unknown"
 
         crop_hash = self._get_image_hash(crop)
         best_match = "unknown"
         min_dist = 256 
         
-        # 2. Global Search
+        # 2. Global Search (Identical to Unit Test logic)
         for name, h_val in self.template_hashes.items():
             dist = self._hamming_distance(crop_hash, h_val)
             if dist < min_dist:
                 min_dist = dist
                 best_match = name
 
-        # Strict Precision threshold: 45 bits out of 256 is ~82% similarity
-        # This prevents "hallucinating" cards that aren't in the template folder.
-        if min_dist > 45:
-            if min_dist < 100: # Only log if it was remotely close
-                print(f"HAND_READER: No confident match. Best: {best_match} (dist: {min_dist})")
+        # Strict Precision threshold: 50 bits out of 256 (~80% similarity)
+        # Only return a match if it's high-confidence and in our whitelist.
+        if min_dist > 50:
             return "unknown"
             
-        print(f"HAND_READER: Confirmed match: {best_match} (dist: {min_dist})")
         return best_match
 
     def _check_playability(self, crop: np.ndarray) -> bool:
@@ -127,7 +144,7 @@ class HandReader:
         for i, pos in enumerate(self.card_slots):
             crop = self._get_crop(image, pos)
             
-            # Always identify the card, even if unplayable
+            # Identify the card name (Always matches against whitelist)
             card_name = self._match_card(crop)
             
             # Check playability for the agent's action mask

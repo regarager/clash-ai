@@ -520,26 +520,28 @@ def get_full_game_state(
     )
 
     # 3. Preprocess Hand Cards into card_ids (Fixed size: 4)
+    # 0 = unknown, 1..8 = templates
     card_ids_list = []
     playable_list = []
+    
+    # Import whitelisted names from hand_reader
+    from .hand_reader import ALLOWED_TEMPLATES
+    whitelist = sorted(list(ALLOWED_TEMPLATES))
+    
     for i, h in enumerate(hand_info):
         name = h["name"]
         playable_list.append(h["playable"])
-        try:
-            if name in class_names:
-                # Map real cards to 1..N, 0 is 'unknown'
-                card_id = class_names.index(name) + 1
-                # print(f"VISION: Slot {i} identified as {name} (ID: {card_id})")
-            else:
-                card_id = 0 # Use 0 for unknown
-                # if name != "unknown":
-                #     print(f"VISION: Slot {i} ({name}) is not in class_names. Falling back to unknown.")
-            card_ids_list.append(card_id)
-        except (ValueError, IndexError):
-            card_ids_list.append(0)
+        
+        if name in whitelist:
+            # Map to 1..8 based on sorted whitelist
+            card_id = whitelist.index(name) + 1
+        else:
+            card_id = 0
+            
+        card_ids_list.append(card_id)
 
     card_ids = torch.tensor(card_ids_list, dtype=torch.long)
-    print(f"VISION: Hand card IDs: {card_ids_list}")
+    print(f"VISION: Hand card IDs: {card_ids_list} (Names: {[h['name'] for h in hand_info]})")
     playable_mask = torch.tensor(playable_list, dtype=torch.bool)
 
     # 4. Preprocess YOLO Detections into continuous features
