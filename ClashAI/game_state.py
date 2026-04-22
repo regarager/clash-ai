@@ -28,6 +28,7 @@ class GameState:
         fixed_inputs: torch.Tensor,
         card_ids: torch.Tensor,
         card_continuous_features: torch.Tensor,
+        playable_mask: torch.Tensor,
         screen_type: GameScreen = GameScreen.UNKNOWN,
     ):
         self.elixir = elixir
@@ -36,12 +37,13 @@ class GameState:
         self.fixed_inputs = fixed_inputs
         self.card_ids = card_ids
         self.card_continuous_features = card_continuous_features
+        self.playable_mask = playable_mask
         self.screen_type = screen_type
 
     def __str__(self) -> str:
         """
         Returns a string representation of the game state for easy reading,
-        including elixir, tower healths, and number of detections.
+        including elixir, tower healths, hand cards, and number of detections.
         """
         output = f"--- Game State ({self.screen_type.name}) ---\n"
         output += f"Elixir: {self.elixir}\n"
@@ -58,6 +60,11 @@ class GameState:
                 output += f"  - {name}: {health:.0%}\n"
         else:
             output += "Towers: Health data not available.\n"
+
+        # Hand Cards (decoded from card_ids)
+        from .vision import CLASS_NAMES
+        hand_names = [CLASS_NAMES[cid] if (cid >= 0 and cid < len(CLASS_NAMES)) else "unknown" for cid in self.card_ids.tolist()]
+        output += f"Hand: {', '.join(hand_names)}\n"
 
         output += f"Detections: {len(self.detections)} objects\n"
 

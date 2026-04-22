@@ -1,8 +1,9 @@
+from time import sleep
 from adb_pywrapper.adb_device import AdbDevice
 
-from bot import Bot
-from vision import get_full_game_state
-from game_state import GameState  # Import GameState
+from ClashAI.bot import Bot
+from ClashAI.vision import get_full_game_state
+from ClashAI.game_state import GameState
 
 
 def main() -> None:
@@ -19,7 +20,7 @@ def main() -> None:
         exit()
     print(f"Connected to ADB device: {bot.device}.")
 
-    print("\nStarting vision test...")
+    print("\nStarting vision data collection (3s intervals)...")
 
     try:
         while True:
@@ -29,9 +30,8 @@ def main() -> None:
             # 2. Print results using the __str__ method
             print("--------------------")
             print(game_state)
-
-            # The screenshot is cleaned up inside get_full_game_state
-            # sleep(1)  # Wait 1 second before next capture
+            
+            sleep(3)
 
     except KeyboardInterrupt:
         print("\nVision test stopped by user.")

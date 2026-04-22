@@ -25,12 +25,18 @@ def reset_hand_reader():
 
 # --- Model and State Configuration Constants (moved from main.py) ---
 FIXED_INPUT_DIM = 9  # Elixir, 6 Tower Healths, Ally Unit Count, Enemy Unit Count
+
+
+def get_base_name(name: str) -> str:
+    return name.removeprefix("enemy-").removeprefix("ally-")
+
+
 # The following are derived from the downloaded model's data.yaml
 CLASS_NAMES = sorted(
     list(
         set(
-            [card.split("-")[-1] for card in CARDS]
-            + [tower.split("-")[-1] for tower in TOWERS]
+            [get_base_name(card) for card in CARDS]
+            + [get_base_name(tower) for tower in TOWERS]
         )
     )
 )
@@ -424,8 +430,9 @@ def get_full_game_state(
             tower_healths=None,
             detections=[],
             fixed_inputs=torch.zeros(FIXED_INPUT_DIM),
-            card_ids=torch.empty(0, dtype=torch.long),
+            card_ids=torch.zeros(4, dtype=torch.long),
             card_continuous_features=torch.empty(0),
+            playable_mask=torch.zeros(4, dtype=torch.bool),
             screen_type=GameScreen.UNKNOWN,
         )
 
@@ -456,8 +463,7 @@ def get_full_game_state(
     _debug_save_hand_crops(screenshot_path, _hand_reader.card_slots, _hand_reader.crop_w, _hand_reader.crop_h)
 
     # Optional: Save crops periodically to build training data
-    if int(time.time()) % 60 < 2: # Every ~60s, save a sample
-        _hand_reader.save_hand_crops(image)
+    _hand_reader.save_hand_crops(image)
 
     # Reclassify GAME_SCREEN as UNKNOWN if no objects are detected
     if screen_type == GameScreen.GAME_SCREEN and not detections:
@@ -515,16 +521,22 @@ def get_full_game_state(
 
     # 3. Preprocess Hand Cards into card_ids (Fixed size: 4)
     card_ids_list = []
+    playable_list = []
     for h in hand_info:
         name = h["name"]
+        playable_list.append(h["playable"])
         try:
-            # We use the same class_names from the global model configuration
-            card_id = class_names.index(name) if name in class_names else 0 # 0 as fallback
+            if name in class_names:
+                # Map real cards to 1..N, 0 is 'unknown'
+                card_id = class_names.index(name) + 1
+            else:
+                card_id = 0 # Use 0 for unknown
             card_ids_list.append(card_id)
         except (ValueError, IndexError):
             card_ids_list.append(0)
 
     card_ids = torch.tensor(card_ids_list, dtype=torch.long)
+    playable_mask = torch.tensor(playable_list, dtype=torch.bool)
 
     # 4. Preprocess YOLO Detections into continuous features
     # Note: We filter out detections that are likely hand cards to focus on field state
@@ -558,6 +570,7 @@ def get_full_game_state(
         fixed_inputs=fixed_inputs,
         card_ids=card_ids,
         card_continuous_features=card_continuous_features,
+        playable_mask=playable_mask,
         screen_type=screen_type,
     )
 
