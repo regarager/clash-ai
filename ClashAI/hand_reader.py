@@ -26,20 +26,25 @@ class HandReader:
 
     def _get_image_hash(self, img: np.ndarray) -> np.ndarray:
         """
-        Generates a 256-bit Difference Hash (dHash).
-        Robust against brightness/contrast changes.
+        Generates a 256-bit Difference Hash (dHash) from the center of the image.
+        Focuses on the character art and ignores noisy edges.
         """
-        # 1. Resize to 17x16 (for 16x16 differences)
-        resized = cv2.resize(img, (17, 16), interpolation=cv2.INTER_AREA)
+        # 1. Center Crop (focus on the central 70% of the card)
+        h, w = img.shape[:2]
+        ch, cw = int(h * 0.7), int(w * 0.7)
+        y1, x1 = (h - ch) // 2, (w - cw) // 2
+        center_img = img[y1:y1+ch, x1:x1+cw]
+
+        # 2. Resize to 17x16 (for 16x16 differences)
+        resized = cv2.resize(center_img, (17, 16), interpolation=cv2.INTER_AREA)
         
-        # 2. Grayscale
+        # 3. Grayscale
         if len(resized.shape) == 3:
             gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
         else:
             gray = resized
             
-        # 3. Compute differences between horizontal pixels
-        # (16 columns of differences)
+        # 4. Compute differences between horizontal pixels
         diff = gray[:, 1:] > gray[:, :-1]
         return diff.flatten()
 
@@ -63,7 +68,7 @@ class HandReader:
                     templates[card_name] = img
                     self.template_hashes[card_name] = self._get_image_hash(img)
         
-        print(f"HAND_READER: Indexed {len(self.template_hashes)} card hashes (dHash 16x16).")
+        print(f"HAND_READER: Indexed {len(self.template_hashes)} card hashes (Center-dHash 16x16).")
         return templates
 
     def reset_active_deck(self):
@@ -71,7 +76,7 @@ class HandReader:
         self.active_deck.clear()
 
     def _match_card(self, crop: np.ndarray) -> str:
-        """Identifies the card using 16x16 dHash."""
+        """Identifies the card using center-weighted 16x16 dHash."""
         if not self.template_hashes:
             return "unknown"
 
@@ -86,8 +91,8 @@ class HandReader:
                 min_dist = dist
                 best_match = name
 
-        # 40 bits out of 256 is ~84% similarity (Priority threshold)
-        if min_dist <= 40: 
+        # 30 bits out of 256 is ~88% similarity (Strict Priority threshold)
+        if min_dist <= 30: 
             return best_match
 
         # 2. Global Search
@@ -99,8 +104,8 @@ class HandReader:
                 min_dist = dist
                 best_match = name
 
-        # Increased tolerance: 110 bits out of 256 is ~57% similarity
-        if min_dist > 110:
+        # Tightened threshold: 80 bits out of 256 is ~69% similarity
+        if min_dist > 80:
             print(f"HAND_READER: No match. Best: {best_match} (dist: {min_dist})")
             return "unknown"
             
