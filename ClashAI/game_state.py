@@ -62,11 +62,12 @@ class GameState:
             output += "Towers: Health data not available.\n"
 
         # Hand Cards (decoded from card_ids)
-        from .vision import CLASS_NAMES
+        from .hand_reader import ALLOWED_TEMPLATES
+        whitelist = sorted(list(ALLOWED_TEMPLATES))
         hand_names = []
         for cid in self.card_ids.tolist():
-            if cid > 0 and cid <= len(CLASS_NAMES):
-                hand_names.append(CLASS_NAMES[cid - 1])
+            if cid > 0 and cid <= len(whitelist):
+                hand_names.append(whitelist[cid - 1])
             else:
                 hand_names.append("unknown")
         output += f"Hand: {', '.join(hand_names)}\n"
