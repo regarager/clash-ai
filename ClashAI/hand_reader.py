@@ -26,11 +26,11 @@ class HandReader:
 
     def _get_image_hash(self, img: np.ndarray) -> np.ndarray:
         """
-        Generates a 256-bit Perceptual Hash (16x16).
-        Returns a boolean numpy array for fast comparison.
+        Generates a 256-bit Difference Hash (dHash).
+        Robust against brightness/contrast changes.
         """
-        # 1. Resize to 16x16
-        resized = cv2.resize(img, (16, 16), interpolation=cv2.INTER_AREA)
+        # 1. Resize to 17x16 (for 16x16 differences)
+        resized = cv2.resize(img, (17, 16), interpolation=cv2.INTER_AREA)
         
         # 2. Grayscale
         if len(resized.shape) == 3:
@@ -38,12 +38,13 @@ class HandReader:
         else:
             gray = resized
             
-        # 3. Compute Mean and build hash
-        avg = gray.mean()
-        return gray > avg
+        # 3. Compute differences between horizontal pixels
+        # (16 columns of differences)
+        diff = gray[:, 1:] > gray[:, :-1]
+        return diff.flatten()
 
     def _hamming_distance(self, h1: np.ndarray, h2: np.ndarray) -> int:
-        """Calculates bit difference between two 16x16 hashes."""
+        """Calculates bit difference between two hashes."""
         return np.count_nonzero(h1 != h2)
 
     def _load_templates(self) -> Dict[str, np.ndarray]:
@@ -62,7 +63,7 @@ class HandReader:
                     templates[card_name] = img
                     self.template_hashes[card_name] = self._get_image_hash(img)
         
-        print(f"HAND_READER: Indexed {len(self.template_hashes)} card hashes (16x16).")
+        print(f"HAND_READER: Indexed {len(self.template_hashes)} card hashes (dHash 16x16).")
         return templates
 
     def reset_active_deck(self):
@@ -70,13 +71,13 @@ class HandReader:
         self.active_deck.clear()
 
     def _match_card(self, crop: np.ndarray) -> str:
-        """Identifies the card using 16x16 hashing."""
+        """Identifies the card using 16x16 dHash."""
         if not self.template_hashes:
             return "unknown"
 
         crop_hash = self._get_image_hash(crop)
         best_match = "unknown"
-        min_dist = 256 # Max distance for 16x16 hash
+        min_dist = 256 
         
         # 1. Priority Search: Active Deck
         for name in self.active_deck:
@@ -85,25 +86,26 @@ class HandReader:
                 min_dist = dist
                 best_match = name
 
-        # 10 bits out of 256 is ~96% similarity
-        if min_dist <= 10: 
+        # 40 bits out of 256 is ~84% similarity (Priority threshold)
+        if min_dist <= 40: 
             return best_match
 
         # 2. Global Search
-        if len(self.active_deck) < self.max_deck_size:
-            for name, h_val in self.template_hashes.items():
-                if name in self.active_deck: continue
-                
-                dist = self._hamming_distance(crop_hash, h_val)
-                if dist < min_dist:
-                    min_dist = dist
-                    best_match = name
+        for name, h_val in self.template_hashes.items():
+            if name in self.active_deck: continue
+            
+            dist = self._hamming_distance(crop_hash, h_val)
+            if dist < min_dist:
+                min_dist = dist
+                best_match = name
 
-        # Threshold: 50 bits out of 256 is ~80% similarity
-        if min_dist > 50:
+        # Increased tolerance: 110 bits out of 256 is ~57% similarity
+        if min_dist > 110:
+            print(f"HAND_READER: No match. Best: {best_match} (dist: {min_dist})")
             return "unknown"
             
         if best_match != "unknown":
+            print(f"HAND_READER: Matched {best_match} (dist: {min_dist})")
             self.active_deck.add(best_match)
             
         return best_match
@@ -112,7 +114,8 @@ class HandReader:
         """Determines if a card is playable based on saturation."""
         hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
         avg_saturation = np.mean(hsv[:, :, 1])
-        return avg_saturation > 45 
+        # print(f"DEBUG: Card saturation: {avg_saturation:.1f}")
+        return avg_saturation > 30 
 
     def _get_crop(self, image: np.ndarray, pos: Tuple[int, int]) -> np.ndarray:
         x_center, y_center = pos
@@ -128,7 +131,11 @@ class HandReader:
         for i, pos in enumerate(self.card_slots):
             crop = self._get_crop(image, pos)
             playable = self._check_playability(crop)
-            card_name = self._match_card(crop)
+            
+            if playable:
+                card_name = self._match_card(crop)
+            else:
+                card_name = "unknown"
             
             hand.append({
                 "slot": i,
