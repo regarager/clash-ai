@@ -27,11 +27,11 @@ class HandReader:
     def _get_image_hash(self, img: np.ndarray) -> np.ndarray:
         """
         Generates a 256-bit Difference Hash (dHash) from the center of the image.
-        Focuses on the character art and ignores noisy edges.
+        Focuses on the character art and ignores noisy edges and backgrounds.
         """
-        # 1. Center Crop (focus on the central 70% of the card)
+        # 1. Center Crop (focus on the central 60% of the card)
         h, w = img.shape[:2]
-        ch, cw = int(h * 0.7), int(w * 0.7)
+        ch, cw = int(h * 0.6), int(w * 0.6)
         y1, x1 = (h - ch) // 2, (w - cw) // 2
         center_img = img[y1:y1+ch, x1:x1+cw]
 
@@ -68,7 +68,7 @@ class HandReader:
                     templates[card_name] = img
                     self.template_hashes[card_name] = self._get_image_hash(img)
         
-        print(f"HAND_READER: Indexed {len(self.template_hashes)} card hashes (Center-dHash 16x16).")
+        print(f"HAND_READER: Indexed {len(self.template_hashes)} card hashes (Precision-dHash 16x16).")
         return templates
 
     def reset_active_deck(self):
@@ -91,8 +91,8 @@ class HandReader:
                 min_dist = dist
                 best_match = name
 
-        # 30 bits out of 256 is ~88% similarity (Strict Priority threshold)
-        if min_dist <= 30: 
+        # 20 bits out of 256 is ~92% similarity (Strict Priority threshold)
+        if min_dist <= 20: 
             return best_match
 
         # 2. Global Search
@@ -104,8 +104,8 @@ class HandReader:
                 min_dist = dist
                 best_match = name
 
-        # Tightened threshold: 80 bits out of 256 is ~69% similarity
-        if min_dist > 80:
+        # Precision threshold: 65 bits out of 256 is ~75% similarity
+        if min_dist > 65:
             print(f"HAND_READER: No match. Best: {best_match} (dist: {min_dist})")
             return "unknown"
             
