@@ -171,7 +171,8 @@ class Minicap:
         """
         os.makedirs("screenshots", exist_ok=True)
         timestamp = int(time())
-        filename = f"screenshots/{timestamp}.jpg"
+        pid = os.getpid()
+        filename = f"screenshots/{timestamp}_{pid}.jpg"
 
         if not self.is_installed():
             raise RuntimeError("Minicap is not installed or functional. Exiting.")

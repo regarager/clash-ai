@@ -34,7 +34,8 @@ class HandReader:
     def __init__(self, template_dir: str):
         # Load hashes/templates for all 100+ cards
         self.reference_hashes = self._load_references(template_dir)
-        self.card_slots = [(530, 1530), (700, 1530), (900, 1530), (1100, 1530)]
+        # Precise centers for 1440x2560 resolution
+        self.card_slots = [(528, 1544), (708, 1544), (892, 1544), (1076, 1544)]
 
     def identify_hand(self, screenshot) -> list[dict]:
         hand = []

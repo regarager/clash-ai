@@ -111,8 +111,8 @@ class ActorCritic(nn.Module):
 
         # --- Handle UI Screens (Non-Battle) ---
         if current_state.screen_type == GameScreen.END_SCREEN:
-            print("BOT: End screen detected. Clicking return to main menu.")
-            self.bot.tap((800, 1540))
+            print("BOT: End screen detected. Clicking Play Again.")
+            self.bot.tap((566, 1692))
             sleep(2)
             return current_state
 
@@ -126,8 +126,8 @@ class ActorCritic(nn.Module):
 
         # --- Handle Active Battle Screen (Agent Actions) ---
         if current_state.screen_type != GameScreen.GAME_SCREEN:
-            print(f"BOT: Non-game screen ({current_state.screen_type.name}) - Clicking (700, 800) to skip.")
-            self.bot.tap((700, 800))
+            print(f"BOT: Non-game screen ({current_state.screen_type.name}) - Clicking (566, 1692) to attempt skip/dismiss.")
+            self.bot.tap((566, 1692))
             return current_state
 
         if not current_state.detections:

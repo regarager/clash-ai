@@ -6,7 +6,6 @@ from typing import List, Dict, Tuple, Set
 from .positions import CARDS
 
 # Hardcoded whitelist of cards we have templates for.
-# This prevents the bot from ever identifying a card not in our library.
 ALLOWED_TEMPLATES = {
     "battle-ram",
     "bomber",
@@ -21,7 +20,7 @@ ALLOWED_TEMPLATES = {
 class HandReader:
     """
     Identifies the 4 cards currently in the bot's hand.
-    Uses center-weighted dHash for robust recognition.
+    Uses high-precision jitter-robust translation-invariant dHash.
     """
 
     def __init__(self, template_dir: str = "setup/card_templates"):
@@ -30,37 +29,49 @@ class HandReader:
         self.crop_w = 110
         self.crop_h = 140
         
-        # State for optimization
+        # State for optimization and persistence
         self.template_hashes: Dict[str, np.ndarray] = {}
         self.active_deck: Set[str] = set()
+        self.last_hand_names: List[str] = ["unknown"] * 4
         
         self.templates = self._load_templates()
 
     def _get_image_hash(self, img: np.ndarray) -> np.ndarray:
         """
-        Generates a 256-bit Difference Hash (dHash) from the center of the image.
-        Focuses on the character art and ignores noisy edges and backgrounds.
+        Generates a 4096-bit translation-invariant hash.
+        Uses a 64x64 grid and Otsu thresholding for extreme precision.
         """
         if img is None or img.size == 0:
-            return np.zeros(256, dtype=bool)
+            return np.zeros(4096, dtype=bool)
 
-        # 1. Center Crop (focus on the central 60% of the card)
-        h, w = img.shape[:2]
-        ch, cw = int(h * 0.6), int(w * 0.6)
-        y1, x1 = (h - ch) // 2, (w - cw) // 2
-        center_img = img[y1:y1+ch, x1:x1+cw]
+        # 1. Pre-process
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+        gray = cv2.equalizeHist(gray)
+        blur = cv2.GaussianBlur(gray, (5, 5), 0)
 
-        # 2. Resize to 17x16 (for 16x16 differences)
-        resized = cv2.resize(center_img, (17, 16), interpolation=cv2.INTER_AREA)
+        # 2. Find "Content" Bounding Box (Otsu Thresholding)
+        sobelx = cv2.Sobel(blur, cv2.CV_64F, 1, 0, ksize=3)
+        sobely = cv2.Sobel(blur, cv2.CV_64F, 0, 1, ksize=3)
+        mag = np.sqrt(sobelx**2 + sobely**2)
+        mag = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         
-        # 3. Grayscale
-        if len(resized.shape) == 3:
-            gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        # Use Otsu to find character edges
+        _, thresh = cv2.threshold(mag, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        coords = np.column_stack(np.where(thresh > 0))
+        
+        if len(coords) > 0:
+            y1, x1 = coords.min(axis=0)
+            y2, x2 = coords.max(axis=0)
+            content_img = gray[max(0, y1):min(gray.shape[0], y2), max(0, x1):min(gray.shape[1], x2)]
         else:
-            gray = resized
-            
-        # 4. Compute differences between horizontal pixels
-        diff = gray[:, 1:] > gray[:, :-1]
+            h, w = gray.shape[:2]
+            ch, cw = int(h * 0.7), int(w * 0.7)
+            y1, x1 = (h - ch) // 2, (w - cw) // 2
+            content_img = gray[y1:y1+ch, x1:x1+cw]
+
+        # 3. Resize and dHash (65x64 for 64x64 bits = 4096 bits)
+        resized = cv2.resize(content_img, (65, 64), interpolation=cv2.INTER_AREA)
+        diff = resized[:, 1:] > resized[:, :-1]
         return diff.flatten()
 
     def _hamming_distance(self, h1: np.ndarray, h2: np.ndarray) -> int:
@@ -77,8 +88,6 @@ class HandReader:
         for filename in os.listdir(self.template_dir):
             if filename.lower().endswith((".png", ".jpg", ".jpeg")):
                 card_name = os.path.splitext(filename)[0]
-                
-                # Only load if it's in our allowed whitelist
                 if card_name not in ALLOWED_TEMPLATES:
                     continue
 
@@ -88,41 +97,63 @@ class HandReader:
                     templates[card_name] = img
                     self.template_hashes[card_name] = self._get_image_hash(img)
         
-        print(f"HAND_READER: Indexed {len(self.template_hashes)} card hashes (Precision-dHash 16x16).")
+        print(f"HAND_READER: Indexed {len(self.template_hashes)} card hashes (Robust-dHash 64x64).")
         return templates
 
     def reset_active_deck(self):
         """Call this at the start of a new match."""
         self.active_deck.clear()
+        self.last_hand_names = ["unknown"] * 4
 
-    def _match_card(self, crop: np.ndarray) -> str:
-        """Identifies the card using center-weighted 16x16 dHash."""
+    def _match_card(self, image: np.ndarray, slot_idx: int) -> str:
+        """
+        Identifies the card using Jitter-Robust matching.
+        """
         if not self.template_hashes:
             return "unknown"
 
-        # 1. Reject solid or very low-contrast crops (empty slots)
-        gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        std_dev = np.std(gray_crop)
-        if std_dev < 10: 
-            return "unknown"
-
-        crop_hash = self._get_image_hash(crop)
-        best_match = "unknown"
-        min_dist = 256 
+        pos = self.card_slots[slot_idx]
+        offsets = [(0,0), (0, -4), (0, -8), (-2, 0), (2, 0)]
         
-        # 2. Global Search (Identical to Unit Test logic)
-        for name, h_val in self.template_hashes.items():
-            dist = self._hamming_distance(crop_hash, h_val)
-            if dist < min_dist:
-                min_dist = dist
-                best_match = name
+        best_overall_match = "unknown"
+        min_overall_dist = 4096
+        best_crop_hash = None
 
-        # Strict Precision threshold: 50 bits out of 256 (~80% similarity)
-        # Only return a match if it's high-confidence and in our whitelist.
-        if min_dist > 50:
-            return "unknown"
+        for dx, dy in offsets:
+            jitter_pos = (pos[0] + dx, pos[1] + dy)
+            crop = self._get_crop(image, jitter_pos)
             
-        return best_match
+            gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+            if np.std(gray_crop) < 10:
+                continue
+
+            current_hash = self._get_image_hash(crop)
+            
+            for name, t_hash in self.template_hashes.items():
+                dist = self._hamming_distance(current_hash, t_hash)
+                if dist < min_overall_dist:
+                    min_overall_dist = dist
+                    best_overall_match = name
+                    best_crop_hash = current_hash
+
+        if best_crop_hash is None:
+            return "unknown"
+
+        # Apply thresholds (1500 for 4096-bit hash, approx 36% error budget)
+        detected_name = best_overall_match if min_overall_dist <= 1500 else "unknown"
+        
+        if detected_name == "unknown":
+            prev_name = self.last_hand_names[slot_idx]
+            if prev_name != "unknown":
+                prev_hash = self.template_hashes.get(prev_name)
+                sticky_dist = self._hamming_distance(best_crop_hash, prev_hash)
+                if sticky_dist < 1800:
+                    detected_name = prev_name
+
+        if detected_name != "unknown":
+            self.last_hand_names[slot_idx] = detected_name
+
+        return detected_name
 
     def _check_playability(self, crop: np.ndarray) -> bool:
         """Determines if a card is playable based on saturation."""
@@ -141,13 +172,10 @@ class HandReader:
     def identify_hand(self, image: np.ndarray) -> List[Dict]:
         """Analyzes the image and returns the status of the 4 hand cards."""
         hand = []
-        for i, pos in enumerate(self.card_slots):
-            crop = self._get_crop(image, pos)
+        for i in range(len(self.card_slots)):
+            card_name = self._match_card(image, i)
             
-            # Identify the card name (Always matches against whitelist)
-            card_name = self._match_card(crop)
-            
-            # Check playability for the agent's action mask
+            crop = self._get_crop(image, self.card_slots[i])
             playable = self._check_playability(crop)
             
             hand.append({
@@ -155,6 +183,7 @@ class HandReader:
                 "name": card_name,
                 "playable": playable
             })
+        
         return hand
 
     def save_hand_crops(self, image: np.ndarray, output_dir: str = "screenshots/hand_crops"):

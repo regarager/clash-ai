@@ -545,20 +545,25 @@ def get_full_game_state(
     playable_mask = torch.tensor(playable_list, dtype=torch.bool)
 
     # 4. Preprocess YOLO Detections into continuous features
-    # Note: We filter out detections that are likely hand cards to focus on field state
+    # Focus only on units within the defined field area
+    from .positions import FIELD_CORNERS
+    fx, fy, fw, fh = FIELD_CORNERS.to_xywh()
+    
     field_detections = [
         d for d in detections 
-        if d["y"] < 1400 # Heuristic: anything above the hand area is a field unit
+        if FIELD_CORNERS.x1 <= d["x"] <= FIELD_CORNERS.x2 and 
+           FIELD_CORNERS.y1 <= d["y"] <= FIELD_CORNERS.y2
     ]
     
     card_continuous_features_list = []
     for detection in field_detections:
-        x_center = detection["x"] / screen_width
-        y_center = detection["y"] / screen_height
-        width = detection["width"] / screen_width
-        height = detection["height"] / screen_height
+        # Normalize relative to FIELD_CORNERS [0, 1]
+        x_rel = (detection["x"] - fx) / fw
+        y_rel = (detection["y"] - fy) / fh
+        w_rel = detection["width"] / fw
+        h_rel = detection["height"] / fh
         card_continuous_features_list.append(
-            [x_center, y_center, width, height]
+            [x_rel, y_rel, w_rel, h_rel]
         )
 
     card_continuous_features = (
