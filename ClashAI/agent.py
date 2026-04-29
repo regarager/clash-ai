@@ -12,9 +12,34 @@ from .game_state import GameScreen, GameState
 from .vision import calculate_reward, get_full_game_state, reset_hand_reader
 
 
-__all__ = ["ActorCritic"]
+__all__ = ["ActorCritic", "RolloutBuffer"]
 
 
+class RolloutBuffer:
+    def __init__(self):
+        self.fixed_inputs = []
+        self.card_ids = []
+        self.card_continuous_features = []
+        self.playable_masks = []
+        self.actions = []  # List of (discrete_idx, continuous_action_np)
+        self.log_probs = []
+        self.rewards = []
+        self.state_values = []
+        self.is_terminals = []
+
+    def clear(self):
+        del self.fixed_inputs[:]
+        del self.card_ids[:]
+        del self.card_continuous_features[:]
+        del self.playable_masks[:]
+        del self.actions[:]
+        del self.log_probs[:]
+        del self.rewards[:]
+        del self.state_values[:]
+        del self.is_terminals[:]
+
+    def __len__(self):
+        return len(self.rewards)
 
 
 class ActorCritic(nn.Module):
@@ -32,13 +57,10 @@ class ActorCritic(nn.Module):
     continuous_action_log_std: nn.Parameter
     critic_head: nn.Sequential
     optimizer: torch.optim.Adam
-    rewards: list[float]
-    log_probs: list[torch.Tensor]
-    state_values: list[torch.Tensor]
+    buffer: RolloutBuffer
 
     def __init__(
         self,
-        bot: Bot,
         fixed_input_dim: int,
         num_card_types: int,
         card_continuous_feature_dim: int,
@@ -47,13 +69,19 @@ class ActorCritic(nn.Module):
         card_embedding_size: int = 16,
         hidden_dim: int = 256,
         learning_rate: float = 1e-4,
+        gamma: float = 0.99,
+        eps_clip: float = 0.2,
+        K_epochs: int = 10,
+        entropy_coef: float = 0.01,
     ):
         super(ActorCritic, self).__init__()
-        self.bot = bot
-        self.rewards = []
-        self.log_probs = []
-        self.state_values = []
-        self.steps_since_update = 0
+        self.buffer = RolloutBuffer()
+        
+        self.gamma = gamma
+        self.eps_clip = eps_clip
+        self.K_epochs = K_epochs
+        self.entropy_coef = entropy_coef
+        
         self.num_card_slots = num_discrete_actions - 1
 
         self.fixed_mlp = nn.Sequential(
@@ -97,50 +125,51 @@ class ActorCritic(nn.Module):
 
     def step(
         self,
+        bot: Bot,
         previous_state: Optional[GameState],
     ) -> GameState:
         """
         Performs one step of the game loop: gets state, selects action,
         calculates reward, and updates the agent.
         """
-        print("\n--- Agent Step Initiated ---")
+        print(f"\n--- Agent Step Initiated (Device: {bot.device}) ---")
 
         # 1. Get current game state
-        current_state = get_full_game_state(self.bot)
+        current_state = get_full_game_state(bot)
         print(f"Current Game State: {current_state}")
 
         # --- Handle UI Screens (Non-Battle) ---
         if current_state.screen_type == GameScreen.END_SCREEN:
-            print("BOT: End screen detected. Clicking Play Again.")
-            self.bot.tap((566, 1692))
+            print(f"BOT ({bot.device}): End screen detected. Clicking Play Again.")
+            bot.tap((566, 1692))
             sleep(2)
+            # If we were in a game, this is a terminal state
+            if previous_state and len(self.buffer) > 0:
+                self.buffer.is_terminals[-1] = True
             return current_state
 
         if current_state.screen_type == GameScreen.MAIN_PAGE:
-            print("BOT: Main page detected. Clicking Battle and resetting HandReader.")
+            print(f"BOT ({bot.device}): Main page detected. Clicking Battle and resetting HandReader.")
             reset_hand_reader()
             from .positions import BATTLE
-            self.bot.tap(BATTLE)
+            bot.tap(BATTLE)
             sleep(2)
             return current_state
 
         # --- Handle Active Battle Screen (Agent Actions) ---
         if current_state.screen_type != GameScreen.GAME_SCREEN:
-            print(f"BOT: Non-game screen ({current_state.screen_type.name}) - Clicking (566, 1692) to attempt skip/dismiss.")
-            self.bot.tap((566, 1692))
+            print(f"BOT ({bot.device}): Non-game screen ({current_state.screen_type.name}) - Clicking (566, 1692) to attempt skip/dismiss.")
+            bot.tap((566, 1692))
             return current_state
 
         if not current_state.detections:
             print(
-                "AGENT DEBUG: Skipping step due to zero detections from vision module."
+                f"AGENT DEBUG ({bot.device}): Skipping step due to zero detections from vision module."
             )
             return current_state  # Skip the rest of the step
 
-        if previous_state is None:
-            return current_state
-
         # 2. Ask agent for action
-        d_action, c_action = self.select_action(
+        d_action, c_action, log_prob, state_val = self.select_action(
             current_state.fixed_inputs,
             current_state.card_ids,
             current_state.card_continuous_features,
@@ -150,6 +179,15 @@ class ActorCritic(nn.Module):
             f"Agent selected Discrete Action: {d_action}, Continuous Action: {c_action}"
         )
 
+        # Store state and action info in buffer
+        self.buffer.fixed_inputs.append(current_state.fixed_inputs)
+        self.buffer.card_ids.append(current_state.card_ids)
+        self.buffer.card_continuous_features.append(current_state.card_continuous_features)
+        self.buffer.playable_masks.append(current_state.playable_mask)
+        self.buffer.actions.append((d_action, c_action))
+        self.buffer.log_probs.append(log_prob)
+        self.buffer.state_values.append(state_val)
+
         # 3. Take action
         if d_action < self.num_card_slots:  # Assuming actions 0-3 are "play card"
             scaled_x = (c_action[0] + 1) / 2
@@ -157,30 +195,40 @@ class ActorCritic(nn.Module):
             print(
                 f"Playing card {d_action} at scaled position ({scaled_x:.2f}, {scaled_y:.2f})"
             )
-            self.bot.play_card(d_action, scaled_x, scaled_y)
+            bot.play_card(d_action, scaled_x, scaled_y)
         else:
             print(f"Agent chose to do nothing (action {d_action}).")
 
         sleep(1)  # Wait for the game to update after an action
-        print("AGENT: Finished waiting.")
+        print(f"AGENT ({bot.device}): Finished waiting.")
 
         # 4. Calculate reward based on state change
-        print("AGENT: Calculating reward...")
-        reward = calculate_reward(current_state, previous_state)
-        self.rewards.append(reward)
-        print(f"AGENT: Reward calculated: {reward}")
+        if previous_state:
+            print("AGENT: Calculating reward...")
+            reward = calculate_reward(current_state, previous_state)
+            self.buffer.rewards.append(reward)
+            # Default to False, will be set to True if game ends
+            self.buffer.is_terminals.append(False)
+            print(f"AGENT: Reward calculated: {reward}")
 
-        self.steps_since_update += 1
-
-        # 5. Update the agent periodically or on game end
-        # We update if we have enough steps or if a big reward (win/loss) is detected
-        if self.steps_since_update >= 10 or abs(reward) >= 500:
-            print(f"AGENT: Updating agent after {self.steps_since_update} steps...")
-            self.update()
-            self.steps_since_update = 0
-            print("AGENT: Agent update complete.")
+            # Check if this state is terminal (king tower down)
+            if current_state.tower_healths:
+                if current_state.tower_healths.get("enemy-king-tower", 1.0) <= 0.05 or \
+                   current_state.tower_healths.get("ally-king-tower", 1.0) <= 0.05:
+                    print("AGENT: King Tower down! Marking as terminal state.")
+                    self.buffer.is_terminals[-1] = True
         else:
-            print(f"AGENT: Buffering reward ({self.steps_since_update}/10 steps to update).")
+            # First step of a match, we don't have a reward yet
+            # We'll need to handle the offset in the buffer or just skip the first transition
+            pass
+
+        # 5. Update the agent periodically
+        # PPO usually uses larger batch sizes, e.g., 128 or 256
+        if len(self.buffer) >= 128:
+            print(f"AGENT: Updating agent with PPO (buffer size: {len(self.buffer)})...")
+            self.update()
+            self.buffer.clear()
+            print("AGENT: Agent update complete.")
 
         return current_state
 
@@ -250,7 +298,7 @@ class ActorCritic(nn.Module):
         card_ids: torch.Tensor | None,
         card_continuous_features: torch.Tensor | None,
         playable_mask: torch.Tensor | None = None,
-    ) -> tuple[int, np.ndarray[Any, Any]]:
+    ) -> tuple[int, np.ndarray[Any, Any], torch.Tensor, torch.Tensor]:
         if fixed_inputs.dim() == 1:
             fixed_inputs = fixed_inputs.unsqueeze(0)
         if card_ids is not None and card_ids.nelement() > 0:
@@ -264,9 +312,10 @@ class ActorCritic(nn.Module):
         if playable_mask is not None and playable_mask.dim() == 1:
             playable_mask = playable_mask.unsqueeze(0)
 
-        discrete_dist, continuous_dist, state_value = self.forward(
-            fixed_inputs, card_ids, card_continuous_features, playable_mask
-        )
+        with torch.no_grad():
+            discrete_dist, continuous_dist, state_value = self.forward(
+                fixed_inputs, card_ids, card_continuous_features, playable_mask
+            )
 
         discrete_action = discrete_dist.sample()
         discrete_idx = int(discrete_action.item())
@@ -288,75 +337,144 @@ class ActorCritic(nn.Module):
             continuous_log_prob = torch.tensor([0.0], device=discrete_action.device)
             continuous_action_np = np.zeros(2)
 
-        self.log_probs.append(discrete_log_prob + continuous_log_prob)
-        self.state_values.append(state_value)
+        total_log_prob = discrete_log_prob + continuous_log_prob
 
-        return discrete_idx, continuous_action_np
+        return discrete_idx, continuous_action_np, total_log_prob.detach(), state_value.detach()
 
-    def update(self, gamma: float = 0.99) -> None:
-        if not self.rewards:
+    def evaluate(
+        self,
+        fixed_inputs: torch.Tensor,
+        card_ids: torch.Tensor,
+        card_continuous_features: torch.Tensor,
+        playable_masks: torch.Tensor,
+        actions: list[tuple[int, np.ndarray]],
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Evaluates a batch of actions for PPO update.
+        """
+        discrete_dist, continuous_dist, state_values = self.forward(
+            fixed_inputs, card_ids, card_continuous_features, playable_masks
+        )
+
+        discrete_actions = torch.tensor([a[0] for a in actions], device=fixed_inputs.device)
+        continuous_actions = torch.tensor([a[1] for a in actions], dtype=torch.float32, device=fixed_inputs.device)
+
+        # 1. Discrete Log-Probs and Entropy
+        discrete_log_probs = discrete_dist.log_prob(discrete_actions)
+        discrete_entropy = discrete_dist.entropy()
+
+        # 2. Continuous Log-Probs and Entropy
+        # For continuous actions, we need to map them to the correct card slot distribution
+        # This is tricky in batch if each action uses a different card slot.
+        # We'll use indexing to pick the right mean/std for each action.
+        
+        batch_indices = torch.arange(len(actions), device=fixed_inputs.device)
+        # discrete_actions is [batch] with values 0..4
+        # We only care about continuous log-probs if discrete_action < 4
+        is_play_card = (discrete_actions < self.num_card_slots)
+        
+        # Initialize continuous log probs and entropy
+        continuous_log_probs = torch.zeros_like(discrete_log_probs)
+        continuous_entropy = torch.zeros_like(discrete_log_probs)
+
+        if is_play_card.any():
+            valid_indices = batch_indices[is_play_card]
+            valid_card_slots = discrete_actions[is_play_card]
+            
+            # Extract relevant mean and std [num_valid, 2]
+            card_means = continuous_dist.loc[valid_indices, valid_card_slots]
+            card_stds = continuous_dist.scale[valid_indices, valid_card_slots]
+            
+            card_dist = Normal(card_means, card_stds)
+            
+            # Extract relevant actions [num_valid, 2]
+            valid_actions = continuous_actions[is_play_card]
+            
+            continuous_log_probs[is_play_card] = card_dist.log_prob(valid_actions).sum(dim=-1)
+            continuous_entropy[is_play_card] = card_dist.entropy().sum(dim=-1)
+
+        total_log_probs = discrete_log_probs + continuous_log_probs
+        total_entropy = discrete_entropy + continuous_entropy
+
+        return total_log_probs, state_values.squeeze(), total_entropy
+
+    def update(self) -> None:
+        if len(self.buffer) == 0:
             return
 
-        rewards = torch.tensor(self.rewards, dtype=torch.float32)
+        # 1. Convert buffer to tensors
+        # Note: card_continuous_features might have different sizes if we used a more complex model,
+        # but here we'll assume they are padded or handled by the forward method.
+        # For now, we'll just stack what we have.
+        
+        device = next(self.parameters()).device
+        
+        # We need to handle the case where some entries in card_continuous_features are empty
+        # For batching, we'll pad them to the max size in this batch.
+        max_units = max([f.shape[0] for f in self.buffer.card_continuous_features])
+        padded_continuous_features = []
+        for f in self.buffer.card_continuous_features:
+            if f.shape[0] < max_units:
+                padding = torch.zeros((max_units - f.shape[0], 4), device=f.device)
+                padded_continuous_features.append(torch.cat([f, padding], dim=0))
+            else:
+                padded_continuous_features.append(f)
 
-        # If all rewards are the same (e.g., all zeros), stddev will be 0.
-        # This can lead to NaNs in normalized returns and subsequent loss calculation.
-        # Skip update if rewards are essentially constant, as there's no learning signal.
-        if (
-            len(rewards) < 2 or rewards.std() < 1e-6
-        ):  # Check if std is too small or only one reward
-            print(
-                f"AGENT WARNING: Skipping update due to constant or insufficient rewards. Stddev: {rewards.std().item()}"
-            )
-            self.rewards.clear()
-            self.log_probs.clear()
-            self.state_values.clear()
-            return
+        old_fixed_inputs = torch.stack(self.buffer.fixed_inputs).to(device)
+        old_card_ids = torch.stack(self.buffer.card_ids).to(device)
+        old_continuous_features = torch.stack(padded_continuous_features).to(device)
+        old_playable_masks = torch.stack(self.buffer.playable_masks).to(device)
+        old_log_probs = torch.stack(self.buffer.log_probs).to(device).detach()
+        old_state_values = torch.stack(self.buffer.state_values).squeeze().to(device).detach()
 
-        log_probs = torch.stack(self.log_probs)
-        state_values = torch.stack(self.state_values).squeeze()
-
-        returns: list[float] = []
-        discounted_reward: float = 0.0
-        for r in reversed(rewards):
-            discounted_reward = r + gamma * discounted_reward
+        # 2. Calculate Returns and Advantages
+        rewards = self.buffer.rewards
+        is_terminals = self.buffer.is_terminals
+        
+        # If the last action wasn't terminal, we might want to bootstrap with the last state value
+        # But for simplicity, we'll just use the rewards in the buffer.
+        returns = []
+        discounted_reward = 0
+        for reward, is_terminal in zip(reversed(rewards), reversed(is_terminals)):
+            if is_terminal:
+                discounted_reward = 0
+            discounted_reward = reward + (self.gamma * discounted_reward)
             returns.insert(0, discounted_reward)
-        returns_tensor = torch.tensor(returns)
-
+            
+        returns = torch.tensor(returns, dtype=torch.float32, device=device)
+        
         # Normalize returns
-        # Add a small epsilon to the std to prevent division by zero, even if std is already 1e-9
-        returns_std = returns_tensor.std()
-        if (
-            returns_std == 0
-        ):  # Ensure we don't divide by zero if all returns are identical
-            returns_tensor = returns_tensor - returns_tensor.mean()  # Just center it
-        else:
-            returns_tensor = (returns_tensor - returns_tensor.mean()) / (
-                returns_std + 1e-9
+        returns = (returns - returns.mean()) / (returns.std() + 1e-7)
+
+        advantages = returns - old_state_values
+
+        # 3. PPO Update Epochs
+        for _ in range(self.K_epochs):
+            # Evaluate old actions with current policy
+            log_probs, state_values, dist_entropy = self.evaluate(
+                old_fixed_inputs, old_card_ids, old_continuous_features, old_playable_masks, self.buffer.actions
             )
 
-        advantage = returns_tensor - state_values.detach()
-        actor_loss = -(log_probs * advantage).mean()
-        critic_loss = nn.functional.mse_loss(state_values, returns_tensor)
-        loss = actor_loss + 0.5 * critic_loss
+            # Ratio (pi_theta / pi_theta__old)
+            ratios = torch.exp(log_probs - old_log_probs)
 
-        # Check for NaNs in loss before backpropagation
-        if torch.isnan(loss):
-            print(
-                "AGENT WARNING: NaN detected in loss. Skipping backpropagation and resetting buffers."
-            )
-            self.rewards.clear()
-            self.log_probs.clear()
-            self.state_values.clear()
-            return
+            # Surrogate Loss
+            surr1 = ratios * advantages
+            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
+            
+            # Loss components
+            actor_loss = -torch.min(surr1, surr2).mean()
+            critic_loss = 0.5 * nn.functional.mse_loss(state_values, returns)
+            entropy_loss = -self.entropy_coef * dist_entropy.mean()
 
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
+            loss = actor_loss + critic_loss + entropy_loss
 
-        self.rewards.clear()
-        self.log_probs.clear()
-        self.state_values.clear()
+            # Update
+            self.optimizer.zero_grad()
+            loss.backward()
+            self.optimizer.step()
+
+        print(f"PPO UPDATE: Actor Loss: {actor_loss.item():.4f}, Critic Loss: {critic_loss.item():.4f}, Entropy: {dist_entropy.mean().item():.4f}")
 
     def save_model(self, path: str = "clash_ai_agent.pth") -> None:
         torch.save(self.state_dict(), path)

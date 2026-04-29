@@ -24,24 +24,30 @@ def run() -> None:
     """
     print("--- Clash Royale AI Bot ---")
 
-    # --- Initialize ADB, Bot, and Agent ---
-    try:
-        # Assuming the first device is the one we want to use
-        bot = Bot(AdbDevice.list_devices()[0])
-    except IndexError:
+    # --- Initialize ADB, Bots, and Agent ---
+    devices = AdbDevice.list_devices()
+    if not devices:
         print("ERROR: No ADB devices found.")
         exit()
 
-    print(f"Connected to ADB device: {bot.device}.")
+    bots = []
+    for device_id in devices:
+        print(f"Connecting to ADB device: {device_id}...")
+        bot = Bot(device_id)
+        
+        # --- Verify Minicap Installation ---
+        if not bot.minicap.is_installed():
+            print(f"ERROR: Minicap is not installed or functional on device {device_id}.")
+            bot.check_minicap()
+            continue
+        
+        bots.append(bot)
 
-    # --- Verify Minicap Installation ---
-    if not bot.minicap.is_installed():
-        print("ERROR: Minicap is not installed or functional on the device.")
-        bot.check_minicap()  # Run diagnostic check for user help
+    if not bots:
+        print("ERROR: No functional bots initialized.")
         exit(1)
 
     agent = ActorCritic(
-        bot=bot,
         fixed_input_dim=FIXED_INPUT_DIM,
         num_card_types=num_card_types,
         card_continuous_feature_dim=CARD_CONTINUOUS_DIM,
@@ -50,19 +56,23 @@ def run() -> None:
         card_embedding_size=CARD_EMBEDDING_SIZE,
     )
     agent.load_model()
+    # Ensure model is in training mode
     agent.train()
-    print("Reinforcement learning agent initialized.")
+    print(f"Reinforcement learning agent initialized. Using {len(bots)} devices.")
 
     print("\nStarting bot...")
 
-    previous_state: Optional[GameState] = None
+    # Track previous state for each bot
+    previous_states: dict[str, Optional[GameState]] = {bot.device: None for bot in bots}
 
     try:
         while True:
-            # The agent's step function now handles the full game loop logic
-            previous_state = agent.step(previous_state)
-            # Add a delay to control the loop speed
-            sleep(1)
+            for bot in bots:
+                # The agent's step function now handles the full game loop logic for one device
+                previous_states[bot.device] = agent.step(bot, previous_states[bot.device])
+            
+            # Add a small delay between rounds of steps
+            sleep(0.1)
 
     except KeyboardInterrupt:
         print("\nBot stopped by user.")
