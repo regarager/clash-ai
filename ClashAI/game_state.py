@@ -7,9 +7,10 @@ class GameScreen(Enum):
     """
     Enum representing the different screens or states the game can be in.
     """
+
     MAIN_PAGE = auto()
     GAME_SCREEN = auto()  # Active battle
-    END_SCREEN = auto()    # Victory/Defeat screen
+    END_SCREEN = auto()  # Victory/Defeat screen
     UNKNOWN = auto()
 
 
@@ -63,6 +64,7 @@ class GameState:
 
         # Hand Cards (decoded from card_ids)
         from .hand_reader import ALLOWED_TEMPLATES
+
         whitelist = sorted(list(ALLOWED_TEMPLATES))
         hand_names = []
         for cid in self.card_ids.tolist():

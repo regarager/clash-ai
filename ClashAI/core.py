@@ -34,13 +34,15 @@ def run() -> None:
     for device_id in devices:
         print(f"Connecting to ADB device: {device_id}...")
         bot = Bot(device_id)
-        
+
         # --- Verify Minicap Installation ---
         if not bot.minicap.is_installed():
-            print(f"ERROR: Minicap is not installed or functional on device {device_id}.")
+            print(
+                f"ERROR: Minicap is not installed or functional on device {device_id}."
+            )
             bot.check_minicap()
             continue
-        
+
         bots.append(bot)
 
     if not bots:
@@ -69,8 +71,10 @@ def run() -> None:
         while True:
             for bot in bots:
                 # The agent's step function now handles the full game loop logic for one device
-                previous_states[bot.device] = agent.step(bot, previous_states[bot.device])
-            
+                previous_states[bot.device] = agent.step(
+                    bot, previous_states[bot.device]
+                )
+
             # Add a small delay between rounds of steps
             sleep(0.1)
 

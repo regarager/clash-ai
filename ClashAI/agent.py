@@ -76,30 +76,26 @@ class ActorCritic(nn.Module):
     ):
         super(ActorCritic, self).__init__()
         self.buffer = RolloutBuffer()
-        
+
         self.gamma = gamma
         self.eps_clip = eps_clip
         self.K_epochs = K_epochs
         self.entropy_coef = entropy_coef
-        
+
         self.num_card_slots = num_discrete_actions - 1
 
         self.fixed_mlp = nn.Sequential(
             nn.Linear(fixed_input_dim, hidden_dim // 2), nn.ReLU()
         )
         self.card_embedding = nn.Embedding(num_card_types + 1, card_embedding_size)
-        
+
         # The attention mechanism now operates only on the card embeddings (size 16)
-        attn_dim = card_embedding_size 
-        nhead = (
-            4 if attn_dim % 4 == 0 else (2 if attn_dim % 2 == 0 else 1)
-        )
+        attn_dim = card_embedding_size
+        nhead = 4 if attn_dim % 4 == 0 else (2 if attn_dim % 2 == 0 else 1)
         self.attention = nn.MultiheadAttention(
             embed_dim=attn_dim, num_heads=nhead, batch_first=True
         )
-        self.cards_mlp = nn.Sequential(
-            nn.Linear(attn_dim, hidden_dim // 2), nn.ReLU()
-        )
+        self.cards_mlp = nn.Sequential(nn.Linear(attn_dim, hidden_dim // 2), nn.ReLU())
 
         combined_feature_dim = hidden_dim
 
@@ -149,16 +145,21 @@ class ActorCritic(nn.Module):
             return current_state
 
         if current_state.screen_type == GameScreen.MAIN_PAGE:
-            print(f"BOT ({bot.device}): Main page detected. Clicking Battle and resetting HandReader.")
+            print(
+                f"BOT ({bot.device}): Main page detected. Clicking Battle and resetting HandReader."
+            )
             reset_hand_reader()
             from .positions import BATTLE
+
             bot.tap(BATTLE)
             sleep(2)
             return current_state
 
         # --- Handle Active Battle Screen (Agent Actions) ---
         if current_state.screen_type != GameScreen.GAME_SCREEN:
-            print(f"BOT ({bot.device}): Non-game screen ({current_state.screen_type.name}) - Clicking (566, 1692) to attempt skip/dismiss.")
+            print(
+                f"BOT ({bot.device}): Non-game screen ({current_state.screen_type.name}) - Clicking (566, 1692) to attempt skip/dismiss."
+            )
             bot.tap((566, 1692))
             return current_state
 
@@ -182,7 +183,9 @@ class ActorCritic(nn.Module):
         # Store state and action info in buffer
         self.buffer.fixed_inputs.append(current_state.fixed_inputs)
         self.buffer.card_ids.append(current_state.card_ids)
-        self.buffer.card_continuous_features.append(current_state.card_continuous_features)
+        self.buffer.card_continuous_features.append(
+            current_state.card_continuous_features
+        )
         self.buffer.playable_masks.append(current_state.playable_mask)
         self.buffer.actions.append((d_action, c_action))
         self.buffer.log_probs.append(log_prob)
@@ -213,8 +216,10 @@ class ActorCritic(nn.Module):
 
             # Check if this state is terminal (king tower down)
             if current_state.tower_healths:
-                if current_state.tower_healths.get("enemy-king-tower", 1.0) <= 0.05 or \
-                   current_state.tower_healths.get("ally-king-tower", 1.0) <= 0.05:
+                if (
+                    current_state.tower_healths.get("enemy-king-tower", 1.0) <= 0.05
+                    or current_state.tower_healths.get("ally-king-tower", 1.0) <= 0.05
+                ):
                     print("AGENT: King Tower down! Marking as terminal state.")
                     self.buffer.is_terminals[-1] = True
         else:
@@ -225,7 +230,9 @@ class ActorCritic(nn.Module):
         # 5. Update the agent periodically
         # PPO usually uses larger batch sizes, e.g., 128 or 256
         if len(self.buffer) >= 128:
-            print(f"AGENT: Updating agent with PPO (buffer size: {len(self.buffer)})...")
+            print(
+                f"AGENT: Updating agent with PPO (buffer size: {len(self.buffer)})..."
+            )
             self.update()
             self.buffer.clear()
             print("AGENT: Agent update complete.")
@@ -244,19 +251,17 @@ class ActorCritic(nn.Module):
 
         # 1. Process Hand Card Embeddings (card_ids should be size 4)
         if card_ids is not None and card_ids.nelement() > 0:
-            hand_embeds = self.card_embedding(card_ids) # [batch, 4, embed_dim]
-            
+            hand_embeds = self.card_embedding(card_ids)  # [batch, 4, embed_dim]
+
             # 2. Process Field Unit Features (card_continuous_features can vary)
             if (
                 card_continuous_features is not None
                 and card_continuous_features.nelement() > 0
             ):
-                field_features = card_continuous_features # [batch, num_units, 4]
+                field_features = card_continuous_features  # [batch, num_units, 4]
                 pass
 
-            attn_output, _ = self.attention(
-                hand_embeds, hand_embeds, hand_embeds
-            )
+            attn_output, _ = self.attention(hand_embeds, hand_embeds, hand_embeds)
             card_features_agg = attn_output.mean(dim=1)
             card_features = self.cards_mlp(card_features_agg)
         else:
@@ -265,7 +270,7 @@ class ActorCritic(nn.Module):
         combined_features = torch.cat([fixed_features, card_features], dim=1)
 
         discrete_logits = self.discrete_action_head(combined_features)
-        
+
         # Apply action mask if provided
         if action_mask is not None:
             # action_mask is [batch, 4] where True means playable.
@@ -273,8 +278,13 @@ class ActorCritic(nn.Module):
             # "Do nothing" (last index) is always allowed.
             batch_size = discrete_logits.shape[0]
             extended_mask = torch.cat(
-                [action_mask, torch.ones((batch_size, 1), device=action_mask.device, dtype=torch.bool)],
-                dim=1
+                [
+                    action_mask,
+                    torch.ones(
+                        (batch_size, 1), device=action_mask.device, dtype=torch.bool
+                    ),
+                ],
+                dim=1,
             )
             # Apply large negative value to unplayable actions
             discrete_logits[~extended_mask] = -1e10
@@ -284,9 +294,11 @@ class ActorCritic(nn.Module):
         # Parameterized continuous action: mean for each card slot
         continuous_params = self.continuous_action_head(combined_features)
         continuous_mean = torch.tanh(continuous_params.view(-1, self.num_card_slots, 2))
-        
+
         # Action variance (shared across batch, but separate for each card slot)
-        action_std = self.continuous_action_log_std.exp().unsqueeze(0).expand_as(continuous_mean)
+        action_std = (
+            self.continuous_action_log_std.exp().unsqueeze(0).expand_as(continuous_mean)
+        )
         continuous_dist = Normal(continuous_mean, action_std)
 
         state_value = self.critic_head(combined_features)
@@ -319,7 +331,7 @@ class ActorCritic(nn.Module):
 
         discrete_action = discrete_dist.sample()
         discrete_idx = int(discrete_action.item())
-        
+
         discrete_log_prob = discrete_dist.log_prob(discrete_action)
 
         if discrete_idx < self.num_card_slots:
@@ -327,11 +339,15 @@ class ActorCritic(nn.Module):
             card_mean = continuous_dist.loc[:, discrete_idx, :]
             card_std = continuous_dist.scale[:, discrete_idx, :]
             card_dist = Normal(card_mean, card_std)
-            
+
             continuous_action_sampled = card_dist.sample()
-            continuous_log_prob = card_dist.log_prob(continuous_action_sampled).sum(dim=-1)
-            
-            continuous_action_np = continuous_action_sampled.squeeze(0).detach().cpu().numpy()
+            continuous_log_prob = card_dist.log_prob(continuous_action_sampled).sum(
+                dim=-1
+            )
+
+            continuous_action_np = (
+                continuous_action_sampled.squeeze(0).detach().cpu().numpy()
+            )
         else:
             # "Do nothing" action has no associated continuous parameter log-prob
             continuous_log_prob = torch.tensor([0.0], device=discrete_action.device)
@@ -339,7 +355,12 @@ class ActorCritic(nn.Module):
 
         total_log_prob = discrete_log_prob + continuous_log_prob
 
-        return discrete_idx, continuous_action_np, total_log_prob.detach(), state_value.detach()
+        return (
+            discrete_idx,
+            continuous_action_np,
+            total_log_prob.detach(),
+            state_value.detach(),
+        )
 
     def evaluate(
         self,
@@ -356,8 +377,12 @@ class ActorCritic(nn.Module):
             fixed_inputs, card_ids, card_continuous_features, playable_masks
         )
 
-        discrete_actions = torch.tensor([a[0] for a in actions], device=fixed_inputs.device)
-        continuous_actions = torch.tensor([a[1] for a in actions], dtype=torch.float32, device=fixed_inputs.device)
+        discrete_actions = torch.tensor(
+            [a[0] for a in actions], device=fixed_inputs.device
+        )
+        continuous_actions = torch.tensor(
+            [a[1] for a in actions], dtype=torch.float32, device=fixed_inputs.device
+        )
 
         # 1. Discrete Log-Probs and Entropy
         discrete_log_probs = discrete_dist.log_prob(discrete_actions)
@@ -367,12 +392,12 @@ class ActorCritic(nn.Module):
         # For continuous actions, we need to map them to the correct card slot distribution
         # This is tricky in batch if each action uses a different card slot.
         # We'll use indexing to pick the right mean/std for each action.
-        
+
         batch_indices = torch.arange(len(actions), device=fixed_inputs.device)
         # discrete_actions is [batch] with values 0..4
         # We only care about continuous log-probs if discrete_action < 4
-        is_play_card = (discrete_actions < self.num_card_slots)
-        
+        is_play_card = discrete_actions < self.num_card_slots
+
         # Initialize continuous log probs and entropy
         continuous_log_probs = torch.zeros_like(discrete_log_probs)
         continuous_entropy = torch.zeros_like(discrete_log_probs)
@@ -380,17 +405,19 @@ class ActorCritic(nn.Module):
         if is_play_card.any():
             valid_indices = batch_indices[is_play_card]
             valid_card_slots = discrete_actions[is_play_card]
-            
+
             # Extract relevant mean and std [num_valid, 2]
             card_means = continuous_dist.loc[valid_indices, valid_card_slots]
             card_stds = continuous_dist.scale[valid_indices, valid_card_slots]
-            
+
             card_dist = Normal(card_means, card_stds)
-            
+
             # Extract relevant actions [num_valid, 2]
             valid_actions = continuous_actions[is_play_card]
-            
-            continuous_log_probs[is_play_card] = card_dist.log_prob(valid_actions).sum(dim=-1)
+
+            continuous_log_probs[is_play_card] = card_dist.log_prob(valid_actions).sum(
+                dim=-1
+            )
             continuous_entropy[is_play_card] = card_dist.entropy().sum(dim=-1)
 
         total_log_probs = discrete_log_probs + continuous_log_probs
@@ -406,9 +433,9 @@ class ActorCritic(nn.Module):
         # Note: card_continuous_features might have different sizes if we used a more complex model,
         # but here we'll assume they are padded or handled by the forward method.
         # For now, we'll just stack what we have.
-        
+
         device = next(self.parameters()).device
-        
+
         # We need to handle the case where some entries in card_continuous_features are empty
         # For batching, we'll pad them to the max size in this batch.
         max_units = max([f.shape[0] for f in self.buffer.card_continuous_features])
@@ -425,12 +452,14 @@ class ActorCritic(nn.Module):
         old_continuous_features = torch.stack(padded_continuous_features).to(device)
         old_playable_masks = torch.stack(self.buffer.playable_masks).to(device)
         old_log_probs = torch.stack(self.buffer.log_probs).to(device).detach()
-        old_state_values = torch.stack(self.buffer.state_values).squeeze().to(device).detach()
+        old_state_values = (
+            torch.stack(self.buffer.state_values).squeeze().to(device).detach()
+        )
 
         # 2. Calculate Returns and Advantages
         rewards = self.buffer.rewards
         is_terminals = self.buffer.is_terminals
-        
+
         # If the last action wasn't terminal, we might want to bootstrap with the last state value
         # But for simplicity, we'll just use the rewards in the buffer.
         returns = []
@@ -440,9 +469,9 @@ class ActorCritic(nn.Module):
                 discounted_reward = 0
             discounted_reward = reward + (self.gamma * discounted_reward)
             returns.insert(0, discounted_reward)
-            
+
         returns = torch.tensor(returns, dtype=torch.float32, device=device)
-        
+
         # Normalize returns
         returns = (returns - returns.mean()) / (returns.std() + 1e-7)
 
@@ -452,7 +481,11 @@ class ActorCritic(nn.Module):
         for _ in range(self.K_epochs):
             # Evaluate old actions with current policy
             log_probs, state_values, dist_entropy = self.evaluate(
-                old_fixed_inputs, old_card_ids, old_continuous_features, old_playable_masks, self.buffer.actions
+                old_fixed_inputs,
+                old_card_ids,
+                old_continuous_features,
+                old_playable_masks,
+                self.buffer.actions,
             )
 
             # Ratio (pi_theta / pi_theta__old)
@@ -460,8 +493,10 @@ class ActorCritic(nn.Module):
 
             # Surrogate Loss
             surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
-            
+            surr2 = (
+                torch.clamp(ratios, 1 - self.eps_clip, 1 + self.eps_clip) * advantages
+            )
+
             # Loss components
             actor_loss = -torch.min(surr1, surr2).mean()
             critic_loss = 0.5 * nn.functional.mse_loss(state_values, returns)
@@ -474,7 +509,9 @@ class ActorCritic(nn.Module):
             loss.backward()
             self.optimizer.step()
 
-        print(f"PPO UPDATE: Actor Loss: {actor_loss.item():.4f}, Critic Loss: {critic_loss.item():.4f}, Entropy: {dist_entropy.mean().item():.4f}")
+        print(
+            f"PPO UPDATE: Actor Loss: {actor_loss.item():.4f}, Critic Loss: {critic_loss.item():.4f}, Entropy: {dist_entropy.mean().item():.4f}"
+        )
 
     def save_model(self, path: str = "clash_ai_agent.pth") -> None:
         torch.save(self.state_dict(), path)

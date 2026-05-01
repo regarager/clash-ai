@@ -30,7 +30,7 @@ def main() -> None:
             # 2. Print results using the __str__ method
             print("--------------------")
             print(game_state)
-            
+
             sleep(3)
 
     except KeyboardInterrupt:

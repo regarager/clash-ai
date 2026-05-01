@@ -11,7 +11,13 @@ from .bot import Bot
 from .cards import CARDS, TOWERS
 from .game_state import GameScreen, GameState
 from .local_yolo_service import get_yolo_predictions
-from .positions import ELIXIR_BAR_BBOX, END_SCREEN_BBOX, MAIN_PAGE_BBOX, TOWER_BBOXES, BBox
+from .positions import (
+    ELIXIR_BAR_BBOX,
+    END_SCREEN_BBOX,
+    MAIN_PAGE_BBOX,
+    TOWER_BBOXES,
+    BBox,
+)
 from .hand_reader import HandReader
 
 # Global instance of HandReader
@@ -176,7 +182,9 @@ def debug_color_range(image_path: str, bbox: BBox, tower_name: str):
     print(f"\nBGR Mean: B={bgr_mean[0]:.1f}, G={bgr_mean[1]:.1f}, R={bgr_mean[2]:.1f}")
 
 
-def _debug_save_hand_crops(image_path: str, card_slots: list[tuple[int, int]], crop_w: int, crop_h: int):
+def _debug_save_hand_crops(
+    image_path: str, card_slots: list[tuple[int, int]], crop_w: int, crop_h: int
+):
     """
     Visualizes the card slots on the screenshot to verify positioning.
     """
@@ -191,9 +199,19 @@ def _debug_save_hand_crops(image_path: str, card_slots: list[tuple[int, int]], c
             x2 = x_center + crop_w // 2
             y2 = y_center + crop_h // 2
             cv2.rectangle(img, (x1, y1), (x2, y2), (255, 255, 0), 3)
-            cv2.putText(img, f"Slot {i}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+            cv2.putText(
+                img,
+                f"Slot {i}",
+                (x1, y1 - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 255, 0),
+                2,
+            )
 
-        debug_path = os.path.join(os.path.dirname(image_path), f"debug_hand_slots_{int(time.time())}.png")
+        debug_path = os.path.join(
+            os.path.dirname(image_path), f"debug_hand_slots_{int(time.time())}.png"
+        )
         cv2.imwrite(debug_path, img)
         print(f"DEBUG: Saved hand slot visualization to {debug_path}")
     except Exception as e:
@@ -308,7 +326,7 @@ def get_game_screen(image_path: str) -> GameScreen:
 
         if blue_fill is not None and blue_fill >= 0.75:
             return GameScreen.END_SCREEN
-    
+
     # 3. Check for Main Page
     # Yellow: #ffbb00 -> RGB(255, 187, 0) -> HSV approx (22, 255, 255)
     mx, my, mw, mh = MAIN_PAGE_BBOX.to_xywh()
@@ -460,14 +478,21 @@ def get_full_game_state(
     print(f"VISION: Hand cards identified: {[h['name'] for h in hand_info]}")
 
     # Debug: Verify positions
-    _debug_save_hand_crops(screenshot_path, _hand_reader.card_slots, _hand_reader.crop_w, _hand_reader.crop_h)
+    _debug_save_hand_crops(
+        screenshot_path,
+        _hand_reader.card_slots,
+        _hand_reader.crop_w,
+        _hand_reader.crop_h,
+    )
 
     # Optional: Save crops periodically to build training data
     _hand_reader.save_hand_crops(image)
 
     # Reclassify GAME_SCREEN as UNKNOWN if no objects are detected
     if screen_type == GameScreen.GAME_SCREEN and not detections:
-        print("VISION: GAME_SCREEN detected but zero objects found. Reclassifying as UNKNOWN.")
+        print(
+            "VISION: GAME_SCREEN detected but zero objects found. Reclassifying as UNKNOWN."
+        )
         screen_type = GameScreen.UNKNOWN
 
     print(f"VISION: Deleting screenshot: {screenshot_path}")
@@ -523,38 +548,43 @@ def get_full_game_state(
     # 0 = unknown, 1..8 = templates
     card_ids_list = []
     playable_list = []
-    
+
     # Import whitelisted names from hand_reader
     from .hand_reader import ALLOWED_TEMPLATES
+
     whitelist = sorted(list(ALLOWED_TEMPLATES))
-    
+
     for i, h in enumerate(hand_info):
         name = h["name"]
         playable_list.append(h["playable"])
-        
+
         if name in whitelist:
             # Map to 1..8 based on sorted whitelist
             card_id = whitelist.index(name) + 1
         else:
             card_id = 0
-            
+
         card_ids_list.append(card_id)
 
     card_ids = torch.tensor(card_ids_list, dtype=torch.long)
-    print(f"VISION: Hand card IDs: {card_ids_list} (Names: {[h['name'] for h in hand_info]})")
+    print(
+        f"VISION: Hand card IDs: {card_ids_list} (Names: {[h['name'] for h in hand_info]})"
+    )
     playable_mask = torch.tensor(playable_list, dtype=torch.bool)
 
     # 4. Preprocess YOLO Detections into continuous features
     # Focus only on units within the defined field area
     from .positions import FIELD_CORNERS
+
     fx, fy, fw, fh = FIELD_CORNERS.to_xywh()
-    
+
     field_detections = [
-        d for d in detections 
-        if FIELD_CORNERS.x1 <= d["x"] <= FIELD_CORNERS.x2 and 
-           FIELD_CORNERS.y1 <= d["y"] <= FIELD_CORNERS.y2
+        d
+        for d in detections
+        if FIELD_CORNERS.x1 <= d["x"] <= FIELD_CORNERS.x2
+        and FIELD_CORNERS.y1 <= d["y"] <= FIELD_CORNERS.y2
     ]
-    
+
     card_continuous_features_list = []
     for detection in field_detections:
         # Normalize relative to FIELD_CORNERS [0, 1]
@@ -562,9 +592,7 @@ def get_full_game_state(
         y_rel = (detection["y"] - fy) / fh
         w_rel = detection["width"] / fw
         h_rel = detection["height"] / fh
-        card_continuous_features_list.append(
-            [x_rel, y_rel, w_rel, h_rel]
-        )
+        card_continuous_features_list.append([x_rel, y_rel, w_rel, h_rel])
 
     card_continuous_features = (
         torch.tensor(card_continuous_features_list, dtype=torch.float32)
