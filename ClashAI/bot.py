@@ -1,7 +1,10 @@
-from time import time, sleep
+from time import sleep
+
 from adb_pywrapper.adb_device import AdbDevice
-from .positions import BATTLE, CARDS, ALLY_CORNERS
+
+from .logger import *
 from .minicap import Minicap
+from .positions import ALLY_CORNERS, BATTLE, CARDS
 
 
 class Bot:
@@ -39,7 +42,7 @@ class Bot:
         self.shell("settings put system pointer_location 0")
         filename = self.minicap.screenshot()
         self.shell("settings put system pointer_location 1")
-        print(f"Screenshotted to {filename}")
+        debug(f"Screenshotted to {filename}")
 
         return filename
 
@@ -59,7 +62,7 @@ class Bot:
                 width = int(dimensions[0])
                 height = int(dimensions[1])
                 return width, height
-        print(
+        warn(
             f"Warning: Could not parse screen size from adb output: {output}. Defaulting to 1920x1080."
         )
         return 1920, 1080

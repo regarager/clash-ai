@@ -1,4 +1,3 @@
-from enum import Enum, auto
 import os
 import time  # For timestamp in debug image filename
 from typing import Any, Optional
@@ -10,9 +9,16 @@ import torch
 from .bot import Bot
 from .cards import CARDS, TOWERS
 from .game_state import GameScreen, GameState
-from .local_yolo_service import get_yolo_predictions
-from .positions import ELIXIR_BAR_BBOX, END_SCREEN_BBOX, MAIN_PAGE_BBOX, TOWER_BBOXES, BBox
 from .hand_reader import HandReader
+from .local_yolo_service import get_yolo_predictions
+from .logger import *
+from .positions import (
+    ELIXIR_BAR_BBOX,
+    END_SCREEN_BBOX,
+    MAIN_PAGE_BBOX,
+    TOWER_BBOXES,
+    BBox,
+)
 
 # Global instance of HandReader
 _hand_reader = HandReader()
@@ -43,51 +49,6 @@ CLASS_NAMES = sorted(
 num_card_types: int = len(CLASS_NAMES)
 class_names: list[str] = CLASS_NAMES
 CARD_CONTINUOUS_DIM = 4  # [center_x, center_y, width, height] from YOLO output
-
-
-def _debug_save_health_bboxes(
-    image_path: str, tower_bboxes: dict[str, BBox], suffix: str = ""
-):
-    """
-    Loads an image, draws bounding boxes for tower health bars, and saves the debug image.
-    """
-    # TODO: remove print
-    print("saving debug ss")
-    try:
-        img = cv2.imread(image_path)
-        if img is None:
-            print(f"DEBUG: Could not load image for drawing bboxes: {image_path}")
-            return
-
-        for name, bbox in tower_bboxes.items():
-            x1, y1, x2, y2 = bbox.to_xyxy()
-            color = (
-                (0, 255, 0) if "ally" in name else (0, 0, 255)
-            )  # Green for ally, Red for enemy
-            cv2.rectangle(img, (x1, y1), (x2, y2), color, 2)  # Draw rectangle
-
-            # Add text label
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            font_scale = 0.5
-            font_thickness = 1
-            text_color = (255, 255, 255)  # White text
-            cv2.putText(
-                img,
-                name,
-                (x1, y1 - 5),
-                font,
-                font_scale,
-                text_color,
-                font_thickness,
-                cv2.LINE_AA,
-            )
-
-        debug_filename = f"debug_health_bboxes_{int(time.time())}{suffix}.png"
-        debug_path = os.path.join(os.path.dirname(image_path), debug_filename)
-        cv2.imwrite(debug_path, img)
-        print(f"DEBUG: Saved health bar bboxes visualization to {debug_path}")
-    except Exception as e:
-        print(f"DEBUG ERROR: Failed to save debug health bboxes image: {e}")
 
 
 def _get_bar_fill_percentage(
@@ -153,30 +114,32 @@ def debug_color_range(image_path: str, bbox: BBox, tower_name: str):
     sample_region = hsv[:, -3:, :]
     sample_pixels = sample_region.reshape(-1, 3)
 
-    print(f"\n--- {tower_name} ---")
-    print(f"Sample region shape: {sample_region.shape}")
-    print("First 10 pixel values (HSV):")
+    debug(header(tower_name))
+    debug(f"Sample region shape: {sample_region.shape}")
+    debug("First 10 pixel values (HSV):")
     for i, pixel in enumerate(sample_pixels[:9]):
-        print(f"  {i}: H={pixel[0]:3.0f}, S={pixel[1]:3.0f}, V={pixel[2]:3.0f}")
+        debug(f"  {i}: H={pixel[0]:3.0f}, S={pixel[1]:3.0f}, V={pixel[2]:3.0f}")
 
     mean_hsv = np.mean(sample_pixels, axis=0)
     std_hsv = np.std(sample_pixels, axis=0)
     min_hsv = np.min(sample_pixels, axis=0)
     max_hsv = np.max(sample_pixels, axis=0)
 
-    print("\nStats:")
-    print(f"  Mean: H={mean_hsv[0]:.1f}, S={mean_hsv[1]:.1f}, V={mean_hsv[2]:.1f}")
-    print(f"  Std:  H={std_hsv[0]:.1f}, S={std_hsv[1]:.1f}, V={std_hsv[2]:.1f}")
-    print(f"  Min:  H={min_hsv[0]:.0f}, S={min_hsv[1]:.0f}, V={min_hsv[2]:.0f}")
-    print(f"  Max:  H={max_hsv[0]:.0f}, S={max_hsv[1]:.0f}, V={max_hsv[2]:.0f}")
+    debug("\nStats:")
+    debug(f"  Mean: H={mean_hsv[0]:.1f}, S={mean_hsv[1]:.1f}, V={mean_hsv[2]:.1f}")
+    debug(f"  Std:  H={std_hsv[0]:.1f}, S={std_hsv[1]:.1f}, V={std_hsv[2]:.1f}")
+    debug(f"  Min:  H={min_hsv[0]:.0f}, S={min_hsv[1]:.0f}, V={min_hsv[2]:.0f}")
+    debug(f"  Max:  H={max_hsv[0]:.0f}, S={max_hsv[1]:.0f}, V={max_hsv[2]:.0f}")
 
     # Check BGR values too
     bgr_sample = health_bar[:, -3:, :].reshape(-1, 3)
     bgr_mean = np.mean(bgr_sample, axis=0)
-    print(f"\nBGR Mean: B={bgr_mean[0]:.1f}, G={bgr_mean[1]:.1f}, R={bgr_mean[2]:.1f}")
+    debug(f"\nBGR Mean: B={bgr_mean[0]:.1f}, G={bgr_mean[1]:.1f}, R={bgr_mean[2]:.1f}")
 
 
-def _debug_save_hand_crops(image_path: str, card_slots: list[tuple[int, int]], crop_w: int, crop_h: int):
+def _debug_save_hand_crops(
+    image_path: str, card_slots: list[tuple[int, int]], crop_w: int, crop_h: int
+):
     """
     Visualizes the card slots on the screenshot to verify positioning.
     """
@@ -191,13 +154,23 @@ def _debug_save_hand_crops(image_path: str, card_slots: list[tuple[int, int]], c
             x2 = x_center + crop_w // 2
             y2 = y_center + crop_h // 2
             cv2.rectangle(img, (x1, y1), (x2, y2), (255, 255, 0), 3)
-            cv2.putText(img, f"Slot {i}", (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+            cv2.putText(
+                img,
+                f"Slot {i}",
+                (x1, y1 - 10),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (255, 255, 0),
+                2,
+            )
 
-        debug_path = os.path.join(os.path.dirname(image_path), f"debug_hand_slots_{int(time.time())}.png")
+        debug_path = os.path.join(
+            os.path.dirname(image_path), f"debug_hand_slots_{int(time.time())}.png"
+        )
         cv2.imwrite(debug_path, img)
-        print(f"DEBUG: Saved hand slot visualization to {debug_path}")
+        debug(f"Saved hand slot visualization to {debug_path}")
     except Exception as e:
-        print(f"DEBUG ERROR: Failed to save hand slot visualization: {e}")
+        error(f"Failed to save hand slot visualization: {e}")
 
 
 def get_tower_healths(image_path: str) -> dict[str, float]:
@@ -236,7 +209,7 @@ def get_tower_healths(image_path: str) -> dict[str, float]:
         x, y, w, h = bbox.to_xywh()
         health_bar_image = image[y : y + h, x : x + w]
 
-        print("calculating for " + name)
+        debug("calculating for " + name)
 
         # debug_color_range(image_path, bbox, name)
 
@@ -294,7 +267,23 @@ def get_game_screen(image_path: str) -> GameScreen:
         ):
             return GameScreen.GAME_SCREEN
 
-    # 2. Check for End Screen (Victory/Defeat)
+    # 2. Check for Main Page
+    # Yellow: #ffbb00 -> RGB(255, 187, 0) -> HSV approx (22, 255, 255)
+    mx, my, mw, mh = MAIN_PAGE_BBOX.to_xywh()
+    if 0 <= my < image.shape[0] and 0 <= mx < image.shape[1]:
+        main_page_region = image[my : my + mh, mx : mx + mw]
+
+        lower_yellow = np.array([15, 150, 150])
+        upper_yellow = np.array([30, 255, 255])
+        yellow_fill = _get_bar_fill_percentage(
+            main_page_region, [(lower_yellow, upper_yellow)]
+        )
+
+        debug(f"{yellow_fill=}")
+        if yellow_fill is not None and yellow_fill >= 0.75:
+            return GameScreen.MAIN_PAGE
+
+    # 3. Check for End Screen (Victory/Defeat)
     # Blue: #4983b2 -> RGB(73, 131, 178) -> HSV approx (104, 150, 178)
     ex, ey, ew, eh = END_SCREEN_BBOX.to_xywh()
     if 0 <= ey < image.shape[0] and 0 <= ex < image.shape[1]:
@@ -308,21 +297,6 @@ def get_game_screen(image_path: str) -> GameScreen:
 
         if blue_fill is not None and blue_fill >= 0.75:
             return GameScreen.END_SCREEN
-    
-    # 3. Check for Main Page
-    # Yellow: #ffbb00 -> RGB(255, 187, 0) -> HSV approx (22, 255, 255)
-    mx, my, mw, mh = MAIN_PAGE_BBOX.to_xywh()
-    if 0 <= my < image.shape[0] and 0 <= mx < image.shape[1]:
-        main_page_region = image[my : my + mh, mx : mx + mw]
-
-        lower_yellow = np.array([15, 150, 150])
-        upper_yellow = np.array([30, 255, 255])
-        yellow_fill = _get_bar_fill_percentage(
-            main_page_region, [(lower_yellow, upper_yellow)]
-        )
-
-        if yellow_fill is not None and yellow_fill >= 0.75:
-            return GameScreen.MAIN_PAGE
 
     return GameScreen.UNKNOWN
 
@@ -354,8 +328,8 @@ def get_object_detections(
         )  # Now directly returns a list of prediction dicts
 
         if not raw_predictions:
-            print(
-                "VISION WARN: No object detections received from Roboflow (or Roboflow error occurred). Proceeding without detections."
+            warn(
+                "No object detections received from Roboflow (or Roboflow error occurred). Proceeding without detections."
             )
             return []  # Explicitly return empty list
 
@@ -373,9 +347,7 @@ def get_object_detections(
                     "class_id",
                 ]
             ):
-                print(
-                    f"VISION WARNING: Malformed prediction received: {prediction}. Skipping."
-                )
+                warn(f"Malformed prediction received: {prediction}. Skipping.")
                 continue
 
             x_center = prediction["x"]
@@ -402,7 +374,7 @@ def get_object_detections(
                 }
             )
     except Exception as e:
-        print(
+        error(
             f"VISION ERROR: An unexpected error occurred during object detection processing: {e}"
         )
         # Return empty detections if any unexpected error occurs during processing
@@ -418,13 +390,13 @@ def get_full_game_state(
     Gets the current game state by taking a screenshot, running object detection,
     and packaging all information into a GameState object.
     """
-    print("VISION: Starting get_full_game_state.")
-    print("VISION: Taking screenshot...")
+    debug("Starting get_full_game_state.")
+    debug("Taking screenshot...")
     screenshot_path = bot.screenshot()
-    print(f"VISION: Screenshot taken: {screenshot_path}")
+    debug(f"Screenshot taken: {screenshot_path}")
 
     if not os.path.exists(screenshot_path):
-        print(f"Error: Screenshot file not found at {screenshot_path}")
+        error(f"Error: Screenshot file not found at {screenshot_path}")
         return GameState(
             elixir=0,
             tower_healths=None,
@@ -438,39 +410,41 @@ def get_full_game_state(
 
     # 0. Detect Screen Type
     screen_type = get_game_screen(screenshot_path)
-    print(f"VISION: Detected Screen: {screen_type.name}")
+    info(f"Detected Screen: {screen_type.name}")
 
     # 1. Get Elixir, Tower Healths, and Object Detections
-    print("VISION: Getting elixir...")
     elixir = get_elixir(screenshot_path)
-    print(f"VISION: Elixir: {elixir}")
+    info(f"Elixir: {elixir}")
 
-    print("VISION: Getting tower healths...")
     tower_healths = get_tower_healths(screenshot_path)
-    print(f"VISION: Tower Healths: {tower_healths}")
+    info(f"Tower Healths: {tower_healths}")
 
     screen_width, screen_height = bot.get_screen_size()
-    print("VISION: Getting object detections (YOLO local inference)...")
     detections = get_object_detections(screenshot_path, (screen_width, screen_height))
-    print(f"VISION: Got {len(detections)} object detections.")
+    info(f"Got {len(detections)} object detections.")
 
     # 1.5 Get Hand Cards (Precise Identification)
     image = cv2.imread(screenshot_path)
     hand_info = _hand_reader.identify_hand(image)
-    print(f"VISION: Hand cards identified: {[h['name'] for h in hand_info]}")
+    info(f"Hand: {[h['name'] for h in hand_info]}")
 
     # Debug: Verify positions
-    _debug_save_hand_crops(screenshot_path, _hand_reader.card_slots, _hand_reader.crop_w, _hand_reader.crop_h)
+    _debug_save_hand_crops(
+        screenshot_path,
+        _hand_reader.card_slots,
+        _hand_reader.crop_w,
+        _hand_reader.crop_h,
+    )
 
     # Optional: Save crops periodically to build training data
     _hand_reader.save_hand_crops(image)
 
     # Reclassify GAME_SCREEN as UNKNOWN if no objects are detected
     if screen_type == GameScreen.GAME_SCREEN and not detections:
-        print("VISION: GAME_SCREEN detected but zero objects found. Reclassifying as UNKNOWN.")
+        debug("GAME_SCREEN detected but zero objects found. Reclassifying as UNKNOWN.")
         screen_type = GameScreen.UNKNOWN
 
-    print(f"VISION: Deleting screenshot: {screenshot_path}")
+    debug(f"VISION: Deleting screenshot: {screenshot_path}")
     os.remove(screenshot_path)  # Clean up screenshot
 
     # 2. Construct fixed inputs for the agent
@@ -523,38 +497,43 @@ def get_full_game_state(
     # 0 = unknown, 1..8 = templates
     card_ids_list = []
     playable_list = []
-    
+
     # Import whitelisted names from hand_reader
     from .hand_reader import ALLOWED_TEMPLATES
+
     whitelist = sorted(list(ALLOWED_TEMPLATES))
-    
+
     for i, h in enumerate(hand_info):
         name = h["name"]
         playable_list.append(h["playable"])
-        
+
         if name in whitelist:
             # Map to 1..8 based on sorted whitelist
             card_id = whitelist.index(name) + 1
         else:
             card_id = 0
-            
+
         card_ids_list.append(card_id)
 
     card_ids = torch.tensor(card_ids_list, dtype=torch.long)
-    print(f"VISION: Hand card IDs: {card_ids_list} (Names: {[h['name'] for h in hand_info]})")
+    info(
+        f"VISION: Hand card IDs: {card_ids_list} (Names: {[h['name'] for h in hand_info]})"
+    )
     playable_mask = torch.tensor(playable_list, dtype=torch.bool)
 
     # 4. Preprocess YOLO Detections into continuous features
     # Focus only on units within the defined field area
     from .positions import FIELD_CORNERS
+
     fx, fy, fw, fh = FIELD_CORNERS.to_xywh()
-    
+
     field_detections = [
-        d for d in detections 
-        if FIELD_CORNERS.x1 <= d["x"] <= FIELD_CORNERS.x2 and 
-           FIELD_CORNERS.y1 <= d["y"] <= FIELD_CORNERS.y2
+        d
+        for d in detections
+        if FIELD_CORNERS.x1 <= d["x"] <= FIELD_CORNERS.x2
+        and FIELD_CORNERS.y1 <= d["y"] <= FIELD_CORNERS.y2
     ]
-    
+
     card_continuous_features_list = []
     for detection in field_detections:
         # Normalize relative to FIELD_CORNERS [0, 1]
@@ -562,9 +541,7 @@ def get_full_game_state(
         y_rel = (detection["y"] - fy) / fh
         w_rel = detection["width"] / fw
         h_rel = detection["height"] / fh
-        card_continuous_features_list.append(
-            [x_rel, y_rel, w_rel, h_rel]
-        )
+        card_continuous_features_list.append([x_rel, y_rel, w_rel, h_rel])
 
     card_continuous_features = (
         torch.tensor(card_continuous_features_list, dtype=torch.float32)
@@ -573,7 +550,7 @@ def get_full_game_state(
     )
 
     # 4. Create and return GameState object
-    print("VISION: Finished get_full_game_state.")
+    debug("VISION: Finished get_full_game_state.")
     return GameState(
         elixir=elixir,
         tower_healths=tower_healths,
@@ -648,7 +625,7 @@ def calculate_reward(
     if current_state.elixir >= 8:
         penalty = 50.0
         reward -= penalty
-        print(f"Calculated reward: Elixir overflow penalty applied: {penalty}")
+        info(f"Calculated reward: Elixir overflow penalty applied: {penalty}")
 
     # --- 5. Win/Loss Condition ---
     if current_state.tower_healths:
@@ -658,8 +635,8 @@ def calculate_reward(
             reward -= 500  # Big penalty for losing
 
     if reward != 0.0:
-        print(f"Calculated reward: {reward}")
+        info(f"Calculated reward: {reward}")
     else:
-        print("Calculated reward: 0.0 (No significant change in state)")
+        info("Calculated reward: 0.0 (No significant change in state)")
 
     return reward

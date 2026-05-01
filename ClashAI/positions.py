@@ -49,6 +49,7 @@ class BBox:
 
 
 BATTLE = (710, 1345)
+PLAY_AGAIN = (570, 1590)
 CARDS = [
     (524, 1544),
     (708, 1544),
@@ -59,8 +60,8 @@ FIELD_CORNERS = BBox(300, 180, 1140, 1300)
 ALLY_CORNERS = BBox(308, 780, 1120, 1284)
 
 ELIXIR_BAR_BBOX = BBox(484, 1674, 1168, 1712)
-MAIN_PAGE_BBOX = BBox.from_xywh(635, 1285, 100, 5)
-END_SCREEN_BBOX = BBox.from_xywh(566, 1692, 100, 5)
+MAIN_PAGE_BBOX = BBox.from_xywh(690, 1355, 10, 2)
+END_SCREEN_BBOX = BBox.from_xywh(770, 1560, 10, 2)
 
 TOWER_HEALTH_WIDTH = 104
 TOWER_HEALTH_HEIGHT = 2  # purposefully less to avoid text

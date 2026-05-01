@@ -1,8 +1,11 @@
-import cv2
-import numpy as np
 import os
 import time
-from typing import List, Dict, Tuple, Set
+from typing import Dict, List, Set, Tuple
+
+import cv2
+import numpy as np
+
+from .logger import *
 from .positions import CARDS
 
 # Hardcoded whitelist of cards we have templates for.
@@ -17,6 +20,7 @@ ALLOWED_TEMPLATES = {
     "valkyrie",
 }
 
+
 class HandReader:
     """
     Identifies the 4 cards currently in the bot's hand.
@@ -28,12 +32,12 @@ class HandReader:
         self.card_slots = CARDS
         self.crop_w = 110
         self.crop_h = 140
-        
+
         # State for optimization and persistence
         self.template_hashes: Dict[str, np.ndarray] = {}
         self.active_deck: Set[str] = set()
         self.last_hand_names: List[str] = ["unknown"] * 4
-        
+
         self.templates = self._load_templates()
 
     def _get_image_hash(self, img: np.ndarray) -> np.ndarray:
@@ -54,20 +58,22 @@ class HandReader:
         sobely = cv2.Sobel(blur, cv2.CV_64F, 0, 1, ksize=3)
         mag = np.sqrt(sobelx**2 + sobely**2)
         mag = cv2.normalize(mag, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-        
+
         # Use Otsu to find character edges
         _, thresh = cv2.threshold(mag, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         coords = np.column_stack(np.where(thresh > 0))
-        
+
         if len(coords) > 0:
             y1, x1 = coords.min(axis=0)
             y2, x2 = coords.max(axis=0)
-            content_img = gray[max(0, y1):min(gray.shape[0], y2), max(0, x1):min(gray.shape[1], x2)]
+            content_img = gray[
+                max(0, y1) : min(gray.shape[0], y2), max(0, x1) : min(gray.shape[1], x2)
+            ]
         else:
             h, w = gray.shape[:2]
             ch, cw = int(h * 0.7), int(w * 0.7)
             y1, x1 = (h - ch) // 2, (w - cw) // 2
-            content_img = gray[y1:y1+ch, x1:x1+cw]
+            content_img = gray[y1 : y1 + ch, x1 : x1 + cw]
 
         # 3. Resize and dHash (65x64 for 64x64 bits = 4096 bits)
         resized = cv2.resize(content_img, (65, 64), interpolation=cv2.INTER_AREA)
@@ -96,8 +102,10 @@ class HandReader:
                 if img is not None:
                     templates[card_name] = img
                     self.template_hashes[card_name] = self._get_image_hash(img)
-        
-        print(f"HAND_READER: Indexed {len(self.template_hashes)} card hashes (Robust-dHash 64x64).")
+
+        debug(
+            f"HAND_READER: Indexed {len(self.template_hashes)} card hashes (Robust-dHash 64x64)."
+        )
         return templates
 
     def reset_active_deck(self):
@@ -113,8 +121,8 @@ class HandReader:
             return "unknown"
 
         pos = self.card_slots[slot_idx]
-        offsets = [(0,0), (0, -4), (0, -8), (-2, 0), (2, 0)]
-        
+        offsets = [(0, 0), (0, -4), (0, -8), (-2, 0), (2, 0)]
+
         best_overall_match = "unknown"
         min_overall_dist = 4096
         best_crop_hash = None
@@ -122,13 +130,13 @@ class HandReader:
         for dx, dy in offsets:
             jitter_pos = (pos[0] + dx, pos[1] + dy)
             crop = self._get_crop(image, jitter_pos)
-            
+
             gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
             if np.std(gray_crop) < 10:
                 continue
 
             current_hash = self._get_image_hash(crop)
-            
+
             for name, t_hash in self.template_hashes.items():
                 dist = self._hamming_distance(current_hash, t_hash)
                 if dist < min_overall_dist:
@@ -141,7 +149,7 @@ class HandReader:
 
         # Apply thresholds (1500 for 4096-bit hash, approx 36% error budget)
         detected_name = best_overall_match if min_overall_dist <= 1500 else "unknown"
-        
+
         if detected_name == "unknown":
             prev_name = self.last_hand_names[slot_idx]
             if prev_name != "unknown":
@@ -159,7 +167,7 @@ class HandReader:
         """Determines if a card is playable based on saturation."""
         hsv = cv2.cvtColor(crop, cv2.COLOR_BGR2HSV)
         avg_saturation = np.mean(hsv[:, :, 1])
-        return avg_saturation > 30 
+        return avg_saturation > 30
 
     def _get_crop(self, image: np.ndarray, pos: Tuple[int, int]) -> np.ndarray:
         x_center, y_center = pos
@@ -174,19 +182,17 @@ class HandReader:
         hand = []
         for i in range(len(self.card_slots)):
             card_name = self._match_card(image, i)
-            
+
             crop = self._get_crop(image, self.card_slots[i])
             playable = self._check_playability(crop)
-            
-            hand.append({
-                "slot": i,
-                "name": card_name,
-                "playable": playable
-            })
-        
+
+            hand.append({"slot": i, "name": card_name, "playable": playable})
+
         return hand
 
-    def save_hand_crops(self, image: np.ndarray, output_dir: str = "screenshots/hand_crops"):
+    def save_hand_crops(
+        self, image: np.ndarray, output_dir: str = "screenshots/hand_crops"
+    ):
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
         timestamp = int(time.time())
