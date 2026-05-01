@@ -1,4 +1,3 @@
-from enum import Enum, auto
 import os
 import time  # For timestamp in debug image filename
 from typing import Any, Optional
@@ -10,6 +9,7 @@ import torch
 from .bot import Bot
 from .cards import CARDS, TOWERS
 from .game_state import GameScreen, GameState
+from .hand_reader import HandReader
 from .local_yolo_service import get_yolo_predictions
 from .positions import (
     ELIXIR_BAR_BBOX,
@@ -18,7 +18,6 @@ from .positions import (
     TOWER_BBOXES,
     BBox,
 )
-from .hand_reader import HandReader
 
 # Global instance of HandReader
 _hand_reader = HandReader()
@@ -312,7 +311,23 @@ def get_game_screen(image_path: str) -> GameScreen:
         ):
             return GameScreen.GAME_SCREEN
 
-    # 2. Check for End Screen (Victory/Defeat)
+    # 2. Check for Main Page
+    # Yellow: #ffbb00 -> RGB(255, 187, 0) -> HSV approx (22, 255, 255)
+    mx, my, mw, mh = MAIN_PAGE_BBOX.to_xywh()
+    if 0 <= my < image.shape[0] and 0 <= mx < image.shape[1]:
+        main_page_region = image[my : my + mh, mx : mx + mw]
+
+        lower_yellow = np.array([15, 150, 150])
+        upper_yellow = np.array([30, 255, 255])
+        yellow_fill = _get_bar_fill_percentage(
+            main_page_region, [(lower_yellow, upper_yellow)]
+        )
+
+        print(f"{yellow_fill=}")
+        if yellow_fill is not None and yellow_fill >= 0.75:
+            return GameScreen.MAIN_PAGE
+
+    # 3. Check for End Screen (Victory/Defeat)
     # Blue: #4983b2 -> RGB(73, 131, 178) -> HSV approx (104, 150, 178)
     ex, ey, ew, eh = END_SCREEN_BBOX.to_xywh()
     if 0 <= ey < image.shape[0] and 0 <= ex < image.shape[1]:
@@ -326,21 +341,6 @@ def get_game_screen(image_path: str) -> GameScreen:
 
         if blue_fill is not None and blue_fill >= 0.75:
             return GameScreen.END_SCREEN
-
-    # 3. Check for Main Page
-    # Yellow: #ffbb00 -> RGB(255, 187, 0) -> HSV approx (22, 255, 255)
-    mx, my, mw, mh = MAIN_PAGE_BBOX.to_xywh()
-    if 0 <= my < image.shape[0] and 0 <= mx < image.shape[1]:
-        main_page_region = image[my : my + mh, mx : mx + mw]
-
-        lower_yellow = np.array([15, 150, 150])
-        upper_yellow = np.array([30, 255, 255])
-        yellow_fill = _get_bar_fill_percentage(
-            main_page_region, [(lower_yellow, upper_yellow)]
-        )
-
-        if yellow_fill is not None and yellow_fill >= 0.75:
-            return GameScreen.MAIN_PAGE
 
     return GameScreen.UNKNOWN
 

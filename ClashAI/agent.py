@@ -11,7 +11,6 @@ from .bot import Bot
 from .game_state import GameScreen, GameState
 from .vision import calculate_reward, get_full_game_state, reset_hand_reader
 
-
 __all__ = ["ActorCritic", "RolloutBuffer"]
 
 
@@ -135,15 +134,6 @@ class ActorCritic(nn.Module):
         print(f"Current Game State: {current_state}")
 
         # --- Handle UI Screens (Non-Battle) ---
-        if current_state.screen_type == GameScreen.END_SCREEN:
-            print(f"BOT ({bot.device}): End screen detected. Clicking Play Again.")
-            bot.tap((566, 1692))
-            sleep(2)
-            # If we were in a game, this is a terminal state
-            if previous_state and len(self.buffer) > 0:
-                self.buffer.is_terminals[-1] = True
-            return current_state
-
         if current_state.screen_type == GameScreen.MAIN_PAGE:
             print(
                 f"BOT ({bot.device}): Main page detected. Clicking Battle and resetting HandReader."
@@ -154,14 +144,28 @@ class ActorCritic(nn.Module):
             bot.tap(BATTLE)
             sleep(2)
             return current_state
+        elif current_state.screen_type == GameScreen.END_SCREEN:
+            print(f"BOT ({bot.device}): End screen detected. Clicking Play Again.")
+
+            from .positions import PLAY_AGAIN
+
+            bot.tap(PLAY_AGAIN)
+            sleep(2)
+            # If we were in a game, this is a terminal state
+            if previous_state and len(self.buffer) > 0:
+                self.buffer.is_terminals[-1] = True
+            return current_state
+
+        elif current_state.screen_type != GameScreen.GAME_SCREEN:
+            from .positions import PLAY_AGAIN
+
+            print(
+                f"BOT ({bot.device}): Non-game screen ({current_state.screen_type.name}) - Clicking {PLAY_AGAIN} to attempt skip/dismiss."
+            )
+            bot.tap((PLAY_AGAIN))
+            return current_state
 
         # --- Handle Active Battle Screen (Agent Actions) ---
-        if current_state.screen_type != GameScreen.GAME_SCREEN:
-            print(
-                f"BOT ({bot.device}): Non-game screen ({current_state.screen_type.name}) - Clicking (566, 1692) to attempt skip/dismiss."
-            )
-            bot.tap((566, 1692))
-            return current_state
 
         if not current_state.detections:
             print(
