@@ -6,8 +6,9 @@ from adb_pywrapper.adb_device import AdbDevice
 
 from .agent import ActorCritic
 from .bot import Bot
-from .vision import FIXED_INPUT_DIM, num_card_types, CARD_CONTINUOUS_DIM
 from .game_state import GameState
+from .logger import *
+from .vision import CARD_CONTINUOUS_DIM, FIXED_INPUT_DIM, num_card_types
 
 # Load environment variables from .env file at the very beginning
 dotenv.load_dotenv()
@@ -22,22 +23,22 @@ def run() -> None:
     """
     Main loop for the Clash Royale AI bot.
     """
-    print("--- Clash Royale AI Bot ---")
+    info("=" * 5 + " ARW " + "=" * 5)
 
     # --- Initialize ADB, Bots, and Agent ---
     devices = AdbDevice.list_devices()
     if not devices:
-        print("ERROR: No ADB devices found.")
+        error("ERROR: No ADB devices found.")
         exit()
 
     bots = []
     for device_id in devices:
-        print(f"Connecting to ADB device: {device_id}...")
+        debug(f"Connecting to ADB device: {device_id}...")
         bot = Bot(device_id)
 
         # --- Verify Minicap Installation ---
         if not bot.minicap.is_installed():
-            print(
+            error(
                 f"ERROR: Minicap is not installed or functional on device {device_id}."
             )
             bot.check_minicap()
@@ -46,7 +47,7 @@ def run() -> None:
         bots.append(bot)
 
     if not bots:
-        print("ERROR: No functional bots initialized.")
+        error("ERROR: No functional bots initialized.")
         exit(1)
 
     agent = ActorCritic(
@@ -60,9 +61,9 @@ def run() -> None:
     agent.load_model()
     # Ensure model is in training mode
     agent.train()
-    print(f"Reinforcement learning agent initialized. Using {len(bots)} devices.")
+    info(f"Reinforcement learning agent initialized. Using {len(bots)} devices.")
 
-    print("\nStarting bot...")
+    debug("\nStarting bot...")
 
     # Track previous state for each bot
     previous_states: dict[str, Optional[GameState]] = {bot.device: None for bot in bots}
@@ -79,7 +80,7 @@ def run() -> None:
             sleep(0.1)
 
     except KeyboardInterrupt:
-        print("\nBot stopped by user.")
+        info("\nBot stopped by user.")
     finally:
         # Save the model on exit
         agent.save_model()

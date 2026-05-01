@@ -9,6 +9,7 @@ from typing_extensions import override
 
 from .bot import Bot
 from .game_state import GameScreen, GameState
+from .logger import *
 from .vision import calculate_reward, get_full_game_state, reset_hand_reader
 
 __all__ = ["ActorCritic", "RolloutBuffer"]
@@ -127,15 +128,15 @@ class ActorCritic(nn.Module):
         Performs one step of the game loop: gets state, selects action,
         calculates reward, and updates the agent.
         """
-        print(f"\n--- Agent Step Initiated (Device: {bot.device}) ---")
+        info(header(f"Agent Step Initiated (Device: {bot.device})"))
 
         # 1. Get current game state
         current_state = get_full_game_state(bot)
-        print(f"Current Game State: {current_state}")
+        info(f"Current Game State: {current_state}")
 
         # --- Handle UI Screens (Non-Battle) ---
         if current_state.screen_type == GameScreen.MAIN_PAGE:
-            print(
+            debug(
                 f"BOT ({bot.device}): Main page detected. Clicking Battle and resetting HandReader."
             )
             reset_hand_reader()
@@ -145,7 +146,7 @@ class ActorCritic(nn.Module):
             sleep(2)
             return current_state
         elif current_state.screen_type == GameScreen.END_SCREEN:
-            print(f"BOT ({bot.device}): End screen detected. Clicking Play Again.")
+            debug(f"BOT ({bot.device}): End screen detected. Clicking Play Again.")
 
             from .positions import PLAY_AGAIN
 
@@ -159,7 +160,7 @@ class ActorCritic(nn.Module):
         elif current_state.screen_type != GameScreen.GAME_SCREEN:
             from .positions import PLAY_AGAIN
 
-            print(
+            debug(
                 f"BOT ({bot.device}): Non-game screen ({current_state.screen_type.name}) - Clicking {PLAY_AGAIN} to attempt skip/dismiss."
             )
             bot.tap((PLAY_AGAIN))
@@ -168,8 +169,8 @@ class ActorCritic(nn.Module):
         # --- Handle Active Battle Screen (Agent Actions) ---
 
         if not current_state.detections:
-            print(
-                f"AGENT DEBUG ({bot.device}): Skipping step due to zero detections from vision module."
+            debug(
+                f"AGENT ({bot.device}): Skipping step due to zero detections from vision module."
             )
             return current_state  # Skip the rest of the step
 
@@ -180,8 +181,8 @@ class ActorCritic(nn.Module):
             current_state.card_continuous_features,
             current_state.playable_mask,
         )
-        print(
-            f"Agent selected Discrete Action: {d_action}, Continuous Action: {c_action}"
+        info(
+            f"AGENT ({bot.device}) selected Discrete Action: {d_action}, Continuous Action: {c_action}"
         )
 
         # Store state and action info in buffer
@@ -199,24 +200,24 @@ class ActorCritic(nn.Module):
         if d_action < self.num_card_slots:  # Assuming actions 0-3 are "play card"
             scaled_x = (c_action[0] + 1) / 2
             scaled_y = (c_action[1] + 1) / 2
-            print(
-                f"Playing card {d_action} at scaled position ({scaled_x:.2f}, {scaled_y:.2f})"
+            info(
+                f"AGENT ({bot.device}) Playing card {d_action} at scaled position ({scaled_x:.2f}, {scaled_y:.2f})"
             )
             bot.play_card(d_action, scaled_x, scaled_y)
         else:
-            print(f"Agent chose to do nothing (action {d_action}).")
+            info(f"AGENT ({bot.device}) chose to do nothing (action {d_action}).")
 
         sleep(1)  # Wait for the game to update after an action
-        print(f"AGENT ({bot.device}): Finished waiting.")
+        debug(f"AGENT ({bot.device}): Finished waiting.")
 
         # 4. Calculate reward based on state change
         if previous_state:
-            print("AGENT: Calculating reward...")
+            debug("Calculating reward...")
             reward = calculate_reward(current_state, previous_state)
             self.buffer.rewards.append(reward)
             # Default to False, will be set to True if game ends
             self.buffer.is_terminals.append(False)
-            print(f"AGENT: Reward calculated: {reward}")
+            debug(f"Reward calculated: {reward}")
 
             # Check if this state is terminal (king tower down)
             if current_state.tower_healths:
@@ -224,7 +225,7 @@ class ActorCritic(nn.Module):
                     current_state.tower_healths.get("enemy-king-tower", 1.0) <= 0.05
                     or current_state.tower_healths.get("ally-king-tower", 1.0) <= 0.05
                 ):
-                    print("AGENT: King Tower down! Marking as terminal state.")
+                    debug("AGENT: King Tower down! Marking as terminal state.")
                     self.buffer.is_terminals[-1] = True
         else:
             # First step of a match, we don't have a reward yet
@@ -234,12 +235,9 @@ class ActorCritic(nn.Module):
         # 5. Update the agent periodically
         # PPO usually uses larger batch sizes, e.g., 128 or 256
         if len(self.buffer) >= 128:
-            print(
-                f"AGENT: Updating agent with PPO (buffer size: {len(self.buffer)})..."
-            )
+            info(f"AGENT: Updating agent with PPO (buffer size: {len(self.buffer)})...")
             self.update()
             self.buffer.clear()
-            print("AGENT: Agent update complete.")
 
         return current_state
 
@@ -513,22 +511,22 @@ class ActorCritic(nn.Module):
             loss.backward()
             self.optimizer.step()
 
-        print(
+        info(
             f"PPO UPDATE: Actor Loss: {actor_loss.item():.4f}, Critic Loss: {critic_loss.item():.4f}, Entropy: {dist_entropy.mean().item():.4f}"
         )
 
     def save_model(self, path: str = "clash_ai_agent.pth") -> None:
         torch.save(self.state_dict(), path)
-        print(f"Model saved to {path}")
+        info(f"Model saved to {path}")
 
     def load_model(self, path: str = "clash_ai_agent.pth") -> None:
         try:
             self.load_state_dict(torch.load(path))
-            print(f"Model loaded from {path}")
+            debug(f"Model loaded from {path}")
         except FileNotFoundError:
-            print(f"No model found at {path}, starting from scratch.")
+            debug(f"No model found at {path}, starting from scratch.")
         except Exception as e:
-            print(f"Error loading model: {e}")
+            error(f"Error loading model: {e}")
 
     def get_value(
         self,
@@ -581,10 +579,4 @@ if __name__ == "__main__":
         card_embedding_size=CARD_EMBEDDING_SIZE,
     )
 
-    print("--- Model Architecture ---")
-    print(model)
-    print("\n" + "=" * 50 + "\n")
-
-    # This example assumes you have a way to create a GameState object.
-    # The step method would be called in a loop within your main training script.
-    # For a full test, you would need to mock get_full_game_state and calculate_reward.
+    info(f"Model architecture: {model}")

@@ -1,8 +1,11 @@
-import cv2
-import numpy as np
 import os
 import time
-from typing import List, Dict, Tuple, Set
+from typing import Dict, List, Set, Tuple
+
+import cv2
+import numpy as np
+
+from .logger import *
 from .positions import CARDS
 
 # Hardcoded whitelist of cards we have templates for.
@@ -100,7 +103,7 @@ class HandReader:
                     templates[card_name] = img
                     self.template_hashes[card_name] = self._get_image_hash(img)
 
-        print(
+        debug(
             f"HAND_READER: Indexed {len(self.template_hashes)} card hashes (Robust-dHash 64x64)."
         )
         return templates

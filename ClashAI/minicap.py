@@ -2,7 +2,10 @@ import os
 import re
 from time import time
 from typing import Optional, Tuple
+
 from adb_pywrapper.adb_device import AdbDevice
+
+from .logger import *
 
 
 class Minicap:
@@ -65,7 +68,7 @@ class Minicap:
         :param local_bin_path: Path to the minicap binary on the local computer.
         :param local_so_path: Path to the minicap.so library on the local computer.
         """
-        print(f"Installing minicap to {self.work_dir}...")
+        info(f"Installing minicap to {self.work_dir}...")
         self.adb.shell(f"mkdir -p {self.work_dir}")
 
         # Push binary and library
@@ -91,10 +94,10 @@ class Minicap:
                 check=True,
             )
             self.adb.shell(f"chmod 777 {self.bin_path}")
-            print("Minicap installed successfully.")
+            info("Minicap installed successfully.")
             return True
         except Exception as e:
-            print(f"Failed to install minicap: {e}")
+            error(f"Failed to install minicap: {e}")
             return False
 
     def is_installed(self) -> bool:
@@ -125,36 +128,35 @@ class Minicap:
 
     def check_installation(self):
         """Prints diagnostic information about the minicap installation."""
-        print(f"--- Minicap Installation Check (Device: {self.device_id}) ---")
+        debug(f"===== Minicap Installation Check (Device: {self.device_id}) =====")
         abi = self.get_abi()
         sdk = self.get_sdk()
-        print(f"Device ABI: {abi}")
-        print(f"Device SDK: {sdk}")
+        debug(f"Device ABI: {abi}")
+        debug(f"Device SDK: {sdk}")
 
         bin_exists = self.adb.shell(f"ls {self.bin_path}").success
         so_exists = self.adb.shell(f"ls {self.so_path}").success
 
-        print(f"Executable exists ({self.bin_path}): {'YES' if bin_exists else 'NO'}")
-        print(f"Shared library exists ({self.so_path}): {'YES' if so_exists else 'NO'}")
+        debug(f"Executable exists ({self.bin_path}): {'YES' if bin_exists else 'NO'}")
+        debug(f"Shared library exists ({self.so_path}): {'YES' if so_exists else 'NO'}")
 
         if bin_exists and so_exists:
             test_cmd = f"LD_LIBRARY_PATH={self.work_dir} {self.bin_path} -i"
             test_res = self.adb.shell(test_cmd)
             if test_res.success and test_res.stdout.strip().startswith("{"):
-                print("Minicap status: OK (Runnable)")
-                print(f"Display Info: {test_res.stdout.strip()}")
+                debug("Minicap status: OK (Runnable)")
+                debug(f"Display Info: {test_res.stdout.strip()}")
             else:
-                print("Minicap status: ERROR (Failed to run)")
-                print(f"Error output: {test_res.stdout} {test_res.stderr}")
-                print(
+                error("Minicap status: ERROR (Failed to run)")
+                error(f"Error output: {test_res.stdout} {test_res.stderr}")
+                error(
                     f"Hint: Ensure you pushed the correct minicap.so for SDK {sdk} and ABI {abi}."
                 )
         else:
-            print("Minicap status: NOT INSTALLED")
-            print(
+            error("Minicap status: NOT INSTALLED")
+            error(
                 f"Hint: Push 'minicap' (ABI: {abi}) and 'minicap.so' (SDK: {sdk}, ABI: {abi}) to {self.work_dir}"
             )
-        print("---------------------------------------------------------")
 
     def take_screenshot(self, filename: str) -> bool:
         """

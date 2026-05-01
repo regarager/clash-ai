@@ -1,12 +1,13 @@
 import argparse
 import os
-from warnings import warn
 
 import cv2
 import numpy as np
 import torch
-from ultralytics.models import YOLO
 from positions import BBox
+from ultralytics.models import YOLO
+
+from .logger import *
 
 
 def train_model(device: str):
@@ -28,20 +29,15 @@ def train_model(device: str):
 
 def validate_image(image_path: str):
     """Validate that the image file exists and can be read by OpenCV"""
-    print(f"Validating image: {image_path}")
+    debug(f"Validating image: {image_path}")
 
     if not os.path.exists(image_path):
         raise FileNotFoundError(f"Image file {image_path} does not exist")
 
     # Check file size
     file_size = os.path.getsize(image_path)
-    print(f"File size: {file_size} bytes")
     if file_size == 0:
         raise ValueError(f"Image file {image_path} is empty")
-
-    # Check file extension
-    file_ext = os.path.splitext(image_path)[1].lower()
-    print(f"File extension: {file_ext}")
 
     # Try to read with OpenCV
     try:
@@ -49,13 +45,13 @@ def validate_image(image_path: str):
         if img is None:
             raise ValueError(f"OpenCV cannot read image file {image_path}")
 
-        print(
+        info(
             f"Image successfully read: {image_path} (shape: {img.shape}, dtype: {img.dtype})"
         )
         return True
 
     except Exception as e:
-        print(f"Error reading image with OpenCV: {e}")
+        error(f"Error reading image with OpenCV: {e}")
 
         # Try alternative reading method
         try:
@@ -64,7 +60,7 @@ def validate_image(image_path: str):
             img = cv2.imdecode(np.asarray(file_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
             if img is None:
                 raise ValueError("Alternative reading method also failed")
-            print(
+            info(
                 f"Image successfully read with alternative method (shape: {img.shape})"
             )
             return True
@@ -76,10 +72,10 @@ def classify_image(model_path: str, image_path: str, confidence_threshold=0.5):
     # Validate image before processing
     validate_image(image_path)
 
-    print(f"Loading model from: {model_path}")
+    info(f"Loading model from: {model_path}")
     model = YOLO(model_path)
 
-    print("Starting prediction...")
+    info("Starting prediction...")
     results = model.predict(
         source=image_path,
         conf=confidence_threshold,
@@ -92,8 +88,8 @@ def classify_image(model_path: str, image_path: str, confidence_threshold=0.5):
 
 def display_results(results, image_path):
     for r in results:
-        print(f"\n--- Detection Results for {image_path} ---")
-        print(f"Number of detections: {len(r.boxes)}")
+        info(f"\n--- Detection Results for {image_path} ---")
+        info(f"Number of detections: {len(r.boxes)}")
 
         class_names = r.names
 
@@ -106,10 +102,10 @@ def display_results(results, image_path):
             class_id_int = int(class_id)  # Convert to integer
             class_name = class_names[class_id_int]  # Use integer index
 
-            print(f"Detection {i + 1}:")
-            print(f"  Class: {class_name} (ID: {class_id_int})")
-            print(f"  Confidence: {confidence:.4f}")
-            print(
+            info(f"Detection {i + 1}:")
+            info(f"  Class: {class_name} (ID: {class_id_int})")
+            info(f"  Confidence: {confidence:.4f}")
+            info(
                 f"  Bounding Box: [{bbox.x1:.1f}, {bbox.y1:.1f}, {bbox.x2:.1f}, {bbox.y2:.1f}]"
             )
 
@@ -161,26 +157,26 @@ def main():
     args = parser.parse_args()
 
     if args.mode == "train":
-        print("Starting model training...")
+        info("Starting model training...")
         train_model(args.device)
-        print("Training completed!")
+        info("Training completed!")
 
     elif args.mode == "classify":
         if not args.image:
-            print("Error: Please provide an image path using --image")
+            error("Error: Please provide an image path using --image")
             return
 
         try:
-            print(f"Classifying image: {args.image}")
+            info(f"Classifying image: {args.image}")
             results = classify_image(args.model, args.image, args.conf)
             display_results(results, args.image)
         except Exception as e:
-            print(f"Error during classification: {e}")
-            print("\nTroubleshooting tips:")
-            print("1. Check if the image file is not corrupted")
-            print("2. Try converting the PNG to JPEG format")
-            print("3. Check if the image has valid content")
-            print("4. Verify the model file is a valid YOLO model")
+            error(f"Error during classification: {e}")
+            error("\nTroubleshooting tips:")
+            error("1. Check if the image file is not corrupted")
+            error("2. Try converting the PNG to JPEG format")
+            error("3. Check if the image has valid content")
+            error("4. Verify the model file is a valid YOLO model")
 
 
 if __name__ == "__main__":

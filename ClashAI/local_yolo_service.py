@@ -1,12 +1,15 @@
 import time
 from typing import (
     Any,
-    List,
     Dict,
+    List,
     Optional,
 )  # Import List and Dict for clearer type hints
+
 from PIL import Image  # For loading images
 from ultralytics import YOLO  # For loading and running YOLO models
+
+from ClashAI.logger import *
 
 # Path to the local YOLOv11 model
 YOLO_MODEL_PATH = "vision/best.pt"
@@ -27,7 +30,7 @@ def _respect_yolo_rate_limit():
 
     if time_since_last_request < MIN_YOLO_REQUEST_INTERVAL:
         sleep_duration = MIN_YOLO_REQUEST_INTERVAL - time_since_last_request
-        print(f"YOLO: Rate limiting - waiting for {sleep_duration:.2f} seconds.")
+        warn(f"YOLO: Rate limiting - waiting for {sleep_duration:.2f} seconds.")
         time.sleep(sleep_duration)
 
     _last_yolo_request_time = time.monotonic()
@@ -51,14 +54,14 @@ def get_yolo_predictions(image_path: str) -> List[Dict[str, Any]]:
 
     if _yolo_model is None:
         try:
-            print(f"YOLO: Loading model from {YOLO_MODEL_PATH}...")
+            info(f"YOLO: Loading model from {YOLO_MODEL_PATH}...")
             _yolo_model = YOLO(YOLO_MODEL_PATH)
-            print("YOLO: Model loaded successfully.")
+            info("YOLO: Model loaded successfully.")
         except Exception as e:
-            print(f"YOLO ERROR: Failed to load model from {YOLO_MODEL_PATH}: {e}")
+            error(f"YOLO ERROR: Failed to load model from {YOLO_MODEL_PATH}: {e}")
             return []  # Return empty predictions on model load failure
 
-    print(f"YOLO: Performing local inference for image: {image_path}")
+    info(f"YOLO: Performing local inference for image: {image_path}")
     try:
         pil_image = Image.open(image_path)
 
@@ -88,14 +91,14 @@ def get_yolo_predictions(image_path: str) -> List[Dict[str, Any]]:
                             "class_id": int(box.cls[0]),
                         }
                     )
-            print(
+            info(
                 f"YOLO: Local inference complete. Got {len(predictions_list)} predictions."
             )
         else:
-            print("YOLO WARNING: No inference results returned from local model.")
+            warn("YOLO WARNING: No inference results returned from local model.")
 
     except Exception as e:
-        print(
+        error(
             f"YOLO ERROR: An unexpected error occurred during local YOLO inference: {e}"
         )
 
@@ -104,8 +107,8 @@ def get_yolo_predictions(image_path: str) -> List[Dict[str, Any]]:
 
 if __name__ == "__main__":
     # Example usage (for testing this module directly)
-    print("This module is intended to be imported as a service.")
-    print("To test, you would typically call get_yolo_predictions with an image path.")
+    warn("This module is intended to be imported as a service.")
+    warn("To test, you would typically call get_yolo_predictions with an image path.")
     # Example:
     # try:
     #     test_image_path = "path/to/your/test_image.jpg"
