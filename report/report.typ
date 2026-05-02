@@ -27,7 +27,7 @@
 // --- Title Section ---
 #align(center)[
   #block(text(weight: "bold", size: 1.4em)[
-    ARW: Actor-Critic Reinforcement Learning Agent for Real-Time Strategy in Clash Royale
+    ARW: Proximal Policy Optimization for Real-Time Strategy in Clash Royale
   ])
   #v(0.5em)
   #grid(
@@ -38,7 +38,7 @@
     ],
     align(center)[
       *Project:* Clash Royale Reinforcement Learning Agent \
-      *Date:* February 13, 2026
+      *Date:* May 1, 2026
     ],
   )
 ]
@@ -46,7 +46,7 @@
 #v(1em)
 
 #abstract[
-  This paper introduces the Autonomous Royale Winner (ARW), a system designed to address the challenges of automating real-time strategy (RTS) play in mobile environments. Specifically targeting Clash Royale, the problem is non-trivial due to the high-dimensional visual state space, hidden information (opponent hand/elixir), and the necessity of complex predictions in high-level play. Our contribution is a modular orchestration loop that synchronizes Android Debug Bridge (ADB) captures with a local YOLOv11 detection model and a hybrid Actor-Critic (A2C) agent. We demonstrate that integrating Multi-head Attention to process game entities allows for emergent strategic behavior, such as elixir conservation, which outperforms naive heuristic baselines.
+  This paper introduces the Autonomous Royale Winner (ARW), a system designed to address the challenges of automating real-time strategy (RTS) play in mobile environments. Specifically targeting Clash Royale, the problem is non-trivial due to the high-dimensional state space and diversity of strategies. Our contribution is a modular orchestration loop that synchronizes Android Debug Bridge (ADB) captures via minicap with a hybrid vision pipeline—utilizing YOLOv11 for unit detection and center-weighted dHash for hand card identification. We implement a Proximal Policy Optimization (PPO) agent with action masking to ensure valid move selection and stable policy convergence. We demonstrate that this architecture achieves autonomous navigation and emergent tactical behavior, significantly improving upon previous iteration baselines.
 ]
 
 #v(1em)
@@ -54,84 +54,137 @@
 #show: columns.with(2, gutter: 1em)
 
 = Past Work and Gaps
-The evolution of game AI provides the foundation for our research. Traditional engines like *Stockfish* [1] rely on alpha-beta search and hand-crafted evaluation functions. While Stockfish achieved superhuman performance in chess, its logic is domain-specific and fails in environments with hidden information or continuous action spaces.
+The evolution of game AI provides the foundation for our research. Traditional
+engines like *Stockfish* [1] rely on alpha-beta search and hand-crafted
+evaluation functions. While Stockfish achieved superhuman performance in chess,
+its logic is domain-specific and fails in environments with hidden information
+or continuous action spaces.
 
-In the RTS domain, the *Pbatch/ClashRoyaleBuildABot* [2] project established a benchmark for mobile automation. It utilized YOLOv5 for unit detection and image hashing for card recognition. However, as noted in the project’s own roadmap [2], it primarily functions as a "state generator" and lacks a sophisticated strategic brain, instead using heuristic reward functions for each unique troop, which cannot easily be scaled.
+In the RTS domain, the *Pbatch/ClashRoyaleBuildABot* [2] project established a
+benchmark for mobile automation. It utilized YOLOv5 for unit detection and
+image hashing for card recognition. However, as noted in the project's own
+roadmap [2], it primarily functions as a "state generator" and lacks a
+sophisticated strategic brain, instead using heuristic reward functions for
+each unique troop, which cannot easily be scaled.
 
-Furthermore, DeepMind’s *AlphaZero* [3] demonstrated that reinforcement learning (RL) could surpass human-curated knowledge by using self-play. However, AlphaZero requires perfect information. Our work bridges the gap between the raw state-generation of *Build-A-Bot* and the deep strategic learning of *AlphaZero* by applying a hybrid Actor-Critic model to the partially-observable, real-time environment of mobile RTS.
+Furthermore, DeepMind's *AlphaZero* [3] demonstrated that reinforcement
+learning (RL) could surpass human-curated knowledge by using self-play.
+However, AlphaZero requires perfect information. Similarly, DeepMind's
+*AlphaStar* [4] achieved Grandmaster-level play in StarCraft II using deep
+reinforcement learning, but relied on a direct API interface rather than
+visual perception—a luxury unavailable for mobile games. Our work bridges the
+gap between the raw state-generation of *Build-A-Bot* and the deep strategic
+learning demonstrated by *AlphaZero* and *AlphaStar*, by applying a hybrid
+Actor-Critic model to the partially-observable, real-time environment of mobile
+RTS.
 
 = Proposal and Preliminary Hypothesis
 We propose that a modular vision-to-RL pipeline will demonstrate superior sample efficiency compared to end-to-end pixel-based models. By decoupling feature extraction from policy optimization, the agent can bypass the "feature-discovery" phase.
 
-- *Hypothesis:* An Actor-Critic agent utilizing a Multi-head Attention mechanism [4] will effectively derive spatial relationships between unit clusters, leading to more precise defensive placements than those achievable by a discretized grid-based model.
-- *Plan of Study:* The project is currently in the architectural validation phase. The next stage of research involves executing an extended training regimen over several thousand episodes to develop strategies similar to those of advanced human players.
-- *Validation:* Validated if the agent is able to continuously increase in trophy rating over time, which is achieved by having a winrate of at least 50%.
-- *Falsification:* Stagnant training entropy or failure to beat a random-action baseline would falsify the architectural choice.
+- *Hypothesis:* A Proximal Policy Optimization (PPO) agent utilizing a Multi-head Attention mechanism [7] and action masking will effectively derive spatial relationships and resource management strategies, leading to higher win rates than unmasked or heuristic baselines.
+- *Plan of Study:* The project has progressed from architectural validation to autonomous training. The current stage involves long-term PPO optimization using parallel environment instances to refine strategic placement.
+- *Validation:* Validated if the agent achieves a positive trophy trend and maintains a win rate above 50% in controlled arena environments.
+- *Falsification:* Failure to converge on a stable policy or inability to outperform a random-action baseline with action masking.
+
+= Design Justification
+We transitioned from A2C to the *Proximal Policy Optimization (PPO)* framework [5]. Unlike standard actor-critic methods, PPO uses a clipped objective function to prevent updates from being too large, which is critical for stability in the volatile environment of a real-time mobile game where state transitions can be sudden.
+
+To handle the "action-validity" problem, we implemented *Action Masking*. In Clash Royale, cards have varying elixir costs. By masking unplayable cards in the policy output based on real-time elixir detection, we force the agent to explore only legal moves, significantly accelerating the convergence of the neural network.
+
+The vision system was upgraded to a hybrid pipeline. While YOLOv11 remains the engine for dynamic unit detection, we identified that hand card recognition requires higher precision to avoid "hallucinations" (detecting units in the UI). We implemented a *64x64 invariant dHash (Difference Hash)* for hand slots. To achieve translation invariance, the system employs *Sobel edge detection* and *Otsu thresholding* to isolate the card's visual content before generating a *4096-bit hash*. To account for UI jitter, we implement *Jitter-Robust matching*, which samples five spatial offsets per slot. Cards are identified if they fall within a Hamming distance threshold of 1500 bits (approx. 36% error budget), ensuring near-perfect accuracy against a known whitelist.
+
+For performance, we integrated *minicap* for screen capture, reducing capture latency from $approx 200$ms to $approx 30$ms. This allows the agent to react to fast-moving units with much higher fidelity.
+
+= Experimentation Methodology
+The system operates via `main.py` and `ClashAI/core.py` in an autonomous loop.
++ *Navigation:* `bot.py` uses template matching to detect "Battle" buttons and other similar prompts, allowing for unattended training sessions across multiple matches.
++ *Perception:* `vision.py` captures the screen via ADB/minicap. It uses YOLOv11 (`best.pt`) for unit detection and `HandReader` (dHash) for card identification.
++ *Decision*: An Actor-Critic model, trained via the PPO algorithm, takes the game state as input (card positions, elixir, etc.) and outputs in a hybrid action space, consisting of the card played and its position.
++ *Execution:* Actions are dispatched via the ADB shell, where inputs like taps can be done using shell commands.
+
+== Assumptions
+- *State Consistency:* We assume the visual features extracted (unit positions, elixir, hand) provide a sufficient Markov state for the agent.
+- *Network Latency:* We assume the local YOLO inference time is negligible compared to the game's 1s decision interval.
+- *Restricted Deck:* Training is conducted using a standardized deck to minimize variance and maximize usability given the limited time.
 
 #figure(
   image("architecture-diagram.png", width: 100%),
   caption: [Architecture of the Project],
 )
 
-= Design Justification
-We chose the *Actor-Critic (A2C)* framework based on findings from *Vinyals et al. [4]*, which suggest that actor-critic methods provide more stable convergence in high-dimensional RTS environments by reducing the variance of gradient estimates.
-
-Unlike *Deep Q-Networks (DQN) [5]*, which are limited to discrete actions, A2C allows us to sample from a Bivariate Normal distribution for placement. This is critical because while the Clash Royale playfield is indeed a discrete grid (when considering only troop placements), the size of the grid makes it difficult to model as a discrete space. Furthermore, using a continuous distribution for locations allows for the project to more easily expand when including spell cards in the future, whose placements are not confined by the same discrete grid that troop placements are.
-
-In regards to the Android emulation, we choose to use Waydroid as the emulator and ADB to communicate with the emulator. Waydroid was selected because of its Linux support as well as its high performance even when considering the emulation overhead. Furthermore, we select ADB because it enables input actions (ex: tapping the screen) as well as grabbing screen output. In addition, ADB is considered as the standard for automating actions on Android Devices *[6]*.
-
-To obtain object detections to use as input to the agent, we choose YOLOv11 because of its high performance, which is necessary for obtaining real-time data, as future versions intend to reduce the time difference between calls to YOLOv11. While other models may be more accurate, they also require more computational time, which could be a problem later on. Therefore, we accept the slight accuracy penalty in exchange for better performance. 
-
-= Experimentation Methodology
-The system operates via `main.py` and `ClashAI/core.py` in a closed loop.
-1. *Perception:* `vision.py` uses HSV masking for Elixir/Health and a local YOLOv11 model (`best.pt`) for unit detection.
-2. *Decision:* The `ActorCritic` model processes the `GameState` to output a hybrid action.
-3. *Execution:* Actions are sent via `bot.py` using ADB.
-
-== Assumptions
-- *Fixed Intervals:* We assume a 1-second decision interval is sufficient. We acknowledge that at higher levels, this restriction becomes a significant limiting factor as many scenarios require several actions in quick succession. However, in the beginning stages, such situations are rare and high frequency decision-making is not necessary.
-- *Starter Deck Scope:* We restricted the dataset of the object detection model to only those in early arenas that the agent/player will see. This significantly limits the amount of training needed by ignoring a signficant proportion of cards that will not be seen presently. We also make few changes to the deck that the agent uses, as we speculate that this will help increase stability.
-- *Accuracy of YOLOv11:* We assume that the detections from the object detection model are correct, otherwise the agent would not be able to be certain about its inputs, reducing the agent's accuracy in turn.
-
 = Results
-The agent was evaluated over a series of five competitive matches against human opponents at the 1000-trophy level. To ensure consistency, the agent utilized a standardized starter deck. The chronological results are recorded in Table 1.
+The agent was evaluated over a series of 25 competitive matches against human opponents at the 1000-trophy level. To ensure consistency, the agent utilized a standardized starter deck. The results are recorded below.
+#import "@preview/cetz:0.4.2"
+#import "@preview/cetz-plot:0.1.3": chart
 
 #figure(
   table(
-    columns: (auto, 1fr, 1fr),
-    inset: 5pt,
-    align: horizon,
-    [*Match*], [*Score (Agent-Opponent)*], [*Outcome*],
-    [1], [3 - 2], [Win],
-    [2], [1 - 3], [Loss],
-    [3], [3 - 0], [Win],
-    [4], [1 - 2], [Loss],
-    [5], [3 - 1], [Win],
+    columns: 10,
+    inset: 4pt,
+    align: center,
+    [*1*], [*2*], [*3*], [*4*], [*5*], [*6*], [*7*], [*8*], [*9*], [*10*],
+    [W], [W], [W], [L], [L], [W], [W], [W], [L], [W],
+    [*11*], [*12*], [*13*], [*14*], [*15*], [*16*], [*17*], [*18*], [*19*], [*20*],
+    [W], [W], [W], [W], [W], [W], [W], [L], [W], [L],
+    [*21*], [*22*], [*23*], [*24*], [*25*], [], [], [], [], [],
+    [W], [L], [W], [W], [W], [], [], [], [], [],
   ),
-  caption: [Chronological Match Performance (1000 Trophy Range)],
+  caption: [Chronological Match Results (25 Matches)],
 )
 
+#let data = (
+  ("Wins",   19),
+  ("Losses", 6),
+)
+
+#cetz.canvas({
+  chart.piechart(
+    data,
+    value-key: 1,
+    label-key: 0,
+    radius: 3,
+    stroke: none,
+    slice-style: (rgb("#2ecc71"), rgb("#e74c3c")),  // discrete green, red
+    inner-radius: 1.2,
+    outset: 0,
+    inner-label: (content: (value, label) => [*#str(value)*], radius: 100%),
+    outer-label: (content: (value, label) => [#label], radius: 115%),
+  )
+})
+
+Constructing a binomial confidence interval using the Clopper-Pearson method, we find that the 95% confidence interval for the winrate of the agent is $(0.549, 0.906)$. Therefore, we conclude that there is evidence that the agent is able to play at the 1000 trophy level, i.e. advance to the next arena.
+
 = Analysis
-The results revealed a clear dichotomy between the agent's strategic emergence and its operational inefficiencies.
+The implementation of *Action Masking* has significantly addressed the previously observed *Elixir Leaking* issue. By preventing the agent from selecting cards that exceed current elixir reserves, the model now exhibits a notably *aggressive playstyle*. Rather than holding cards, the PPO agent tends to spend elixir as soon as it is available, prioritizing offensive momentum over resource conservation.
 
-The most significant unexpected behavior observed was *Elixir Leaking*. Logs indicated that the agent frequently chose the "Do Nothing" (NOP) action even when the elixir bar reached its maximum value of 10. This effectively wasted potential resources, a phenomenon known in RTS literature as "resource overflow." This likely occurs because the Critic's value estimation for playing a card at that specific moment did not outweigh the perceived "safety" of holding current hand positions, or perhaps due to noise in the HSV elixir-detection module failing to trigger the "must-play" threshold. For the future, being able to correctly determine when to use the NOP is crucial for optimal gameplay.
+A significant emergent behavior is the *Dual-Lane Push*. The Multi-head Attention layer [7] allows the agent to recognize opportunities to split pressure across both towers. This often overwhelms opponents in the 1000-trophy range who struggle to defend two lanes simultaneously.
 
-While the agent successfully secured a majority of wins, it is important to contextualize this performance. The *1000-trophy level* represents the "early-game" tier of *Clash Royale*, where opponents often exhibit predictable patterns and sub-optimal card interactions. Therefore, while these results validate the modular orchestration loop and the hypothesis that a hybrid A2C model can win matches, they are *not indicative of significant skill* or high-level strategic reasoning. At this level, the "Tank-and-Spank" pattern—identified by the Multi-head Attention layer [6] as a high-reward sequence—is often sufficient to overwhelm novice players, regardless of the elixir leakage.
+However, this aggression comes at the cost of being *weaker defensively*. Because the agent is biased toward playing cards offensively as soon as the action mask allows, it often lacks the elixir reserves necessary to react to sudden counter-pushes. At the agent's current trophy level (1000), this playstyle is sufficient for achieving victory over other players, but at higher levels this strategy will likely fail.
 
-Through observation of gameplay footage, a notable improvement in spatial reasoning was detected across the match sequence. In later games (3–5), the agent began to choose superior horizontal positioning; it correctly identified which "lane" or half of the arena to play on based on detected enemy troop clusters. However, the agent continued to struggle with the *vertical axis*. Placement along the $y$-axis appeared erratic and lacked discernible patterns, suggesting that while the Multi-head Attention layer successfully mapped "lane" threats, it has not yet correlated vertical depth with defensive efficacy (e.g., "pulling" troops to the center).
+= Limitations
+While the PPO-based architecture demonstrates clear improvements over prior iterations, several constraints remain that bound the agent's current capabilities:
 
-Despite these struggles, Match 5 demonstrated the emergence of a valid offensive strategy: the *"Push."* The agent began placing several cards in rapid succession on the same side of the arena, creating a concentrated offensive force. This behavior validates that the A2C model is beginning to recognize the additive value of unit synergies. By grouping units, the agent overwhelmed the opponent's defenses, proving that the model can transcend individual card evaluations to form multi-card tactical sequences.
+- *Decision Latency:* The approximately 1-second perception-decision loop—composed of minicap capture, YOLOv11 inference, and post-action delay—is adequate for offensive card deployment but too slow for precise reactive maneuvers. Defensive actions such as troop "kiting" or spell placement against fast-moving threats (e.g., Hog Rider, Prince) require sub-second timing that the current pipeline cannot reliably achieve.
+
+- *Perception Accuracy:* The YOLOv11 object detection model, while selected for inference speed over raw accuracy, introduces occasional classification errors on visually similar units. These misclassifications propagate into the agent's state representation, causing suboptimal decisions. Furthermore, the current object detection model scales poorly given the huge amount of cards in the game, in addition to variations of base cards such as Heroes and Evolutions. Addressing this through direct state acquisition (see Future Work §1) may prove more robust than incremental model refinement.
+
+- *Shifting Object:* While not a limitation of the agent itself, it can be difficult to accurately evaluate the agent's skill, as other variables such as card levels and opponent skill can influence the outcomes of a match.
 
 = Conclusion
-The project successfully demonstrates that a modular A2C backend has the potential to navigate mobile RTS complexities. We justified the hybrid (discrete and continuous) action space for coordinate selection and proved that "priming" the agent with CV-extracted features leads to faster policy convergence.
+The project successfully demonstrates that a modular PPO backend, combined with a specialized vision pipeline, can autonomously navigate the complexities of a mobile RTS. The transition from A2C to PPO with action masking produced measurable improvements in resource utilization and eliminated the elixir leakage observed in prior iterations. The dHash-based hand reader provides near-perfect card identification, solving the hallucination problem inherent in pure object detection approaches.
+
+However, the findings also reveal that solving the action-validity problem introduces new challenges in strategic balance. The agent's emergent aggression, while tactically effective at low trophy ranges, underscores that reinforcement learning in resource-constrained environments requires careful reward shaping to prevent policy collapse toward extreme behaviors. The current limitations in decision latency and perception accuracy represent the primary barriers to higher-level competitive play.
 
 = Future Work
-If granted additional time, we would:
-1. *Hybrid Policy Gradient:* Currently, the agent considers the values of the discrete and continuous action spaces independently, i.e. the agent chooses the best card and the best location, which may not be optimal. Using this algorithm would allow for distinction between the optimal placements for different cards.
-2. *Increase Information:* The agent's abilities can be expanded once more information is included. For example, knowing the time remaining could be used to change the strategy based on the difference in tower health, e.g. playing more defensively or offensively as necessary.
-3. *YOLO Refinement:* Expand the training set to include more cards, as well as increasing accuracy on the current dataset.
-4. *Multiple Actors:* Distribute instances of the agent across several instances using an asynchronous advantage actor-critic (A3C) architecture, allowing for training on more diverse gameplay as well as increasing training speed.
-5. *More training:* The project currently has the foundations necessary to faciliate training, which will be done in the future to see if superior gameplay is achievable.
+If granted additional time, we would pursue several directions, each addressing specific limitations identified above:
+
+1. *Memory-based State Detection:* Extract game state directly from the game's runtime memory rather than through computer vision. This would provide perfectly accurate state information and eliminate both classification errors and the dependency on fixed UI layouts (addressing Limitations §2). However, this approach requires significant reverse engineering effort.
+
+2. *Recurrent Policies:* Integrate Long Short-Term Memory (LSTM) layers into the policy network. A recurrent architecture would allow the agent to track opponent card cycles across time steps, enabling predictive defensive play that compensates for the current decision latency (addressing Limitations §1).
+
+3. *Advanced Reward Shaping:* Implement rewards based on tower health differentials and elixir efficiency ratios. Explicitly penalizing "overcommitment" (spending elixir without corresponding tower damage) would counteract the aggressive bias introduced by action masking.
+
+4. *Increased Game Information:* Incorporate Evolution and Hero cards into the action space and detection pipeline, expanding the agent's strategic vocabulary to match the full scope of modern Clash Royale gameplay.
 
 = References
 
@@ -153,7 +206,7 @@ If granted additional time, we would:
 )
 #reference(
   [5],
-  [Mnih, V., et al. "Human-level control through deep reinforcement learning." _Nature_, 2015. (Standard DQN Reference).],
+  [Schulman, J., et al. "Proximal Policy Optimization Algorithms." _arXiv preprint arXiv:1707.06347_, 2017.],
 )
 #reference(
   [6],
